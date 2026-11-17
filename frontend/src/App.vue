@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import logoImg from "../logo.jpg";
 import HugeIcon from "./components/HugeIcon.vue";
 import ScheduleModal from "./components/ScheduleModal.vue";
 import { api } from "./api/bridge";
@@ -303,13 +304,13 @@ onUnmounted(() => {
   <div class="app-shell">
     <!-- Sidebar Desktop / Layar Lebar -->
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">
-          <HugeIcon name="megaphone-01" :size="20" />
+      <div class="brand brand-card">
+        <div class="brand-logo-wrap">
+          <img :src="logoImg" alt="Logo JPT Pengumuman Terjadwal" class="brand-logo" />
         </div>
         <div>
           <p class="brand-title">JPT Announce</p>
-          <p class="brand-sub">Penjadwal Pengumuman</p>
+          <p class="brand-sub">Pengumuman Terjadwal</p>
         </div>
       </div>
 
@@ -343,13 +344,13 @@ onUnmounted(() => {
     <!-- Header Mobile -->
     <header class="mobile-header">
       <div class="brand">
-        <div class="brand-mark">
-          <HugeIcon name="megaphone-01" :size="20" />
+        <div class="brand-logo-wrap">
+          <img :src="logoImg" alt="Logo JPT Pengumuman Terjadwal" class="brand-logo" />
         </div>
         <div>
           <p class="brand-title">JPT Announce</p>
           <p class="brand-sub">
-            {{ dashboard?.platform.platform === "android" ? "Mode Android" : "Penjadwal Audio" }}
+            {{ dashboard?.platform.platform === "android" ? "Mode Android" : "Pengumuman Terjadwal" }}
           </p>
         </div>
       </div>

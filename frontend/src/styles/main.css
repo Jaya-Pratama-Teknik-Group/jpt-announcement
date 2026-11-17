@@ -1,13 +1,15 @@
 :root {
-  --bg: #f6f8fc;
+  --bg: #f5f7fb;
   --surface: #ffffff;
-  --surface-muted: #f1f5fb;
-  --border: #e2e8f2;
-  --text: #0f172a;
-  --text-muted: #52627a;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-soft: #e8f0fe;
+  --surface-muted: #eff3f9;
+  --border: #dfe6f0;
+  --text: #0f213a;
+  --text-muted: #52647d;
+  --primary: #184a7e;
+  --primary-hover: #123963;
+  --primary-soft: #e8f0fa;
+  --accent: #f1593a;
+  --accent-soft: #fff1ed;
   --success: #15803d;
   --success-soft: #e6f7ed;
   --warning: #b45309;
@@ -15,28 +17,28 @@
   --danger: #b91c1c;
   --danger-soft: #fde8e8;
   --radius: 14px;
-  --shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+  --shadow: 0 2px 12px rgba(15, 33, 58, 0.05);
   --nav-height: 68px;
-  --sidebar-width: 248px;
+  --sidebar-width: 252px;
 
-  /* Soft menu tab palette */
-  --tab-dashboard-bg: #eef5ff;
-  --tab-dashboard-bg-active: linear-gradient(135deg, #ebf3ff 0%, #e4ecff 100%);
-  --tab-dashboard-fg: #2563eb;
-  --tab-dashboard-border: #cfe0ff;
+  /* Soft menu tab palette harmonized with JPT Navy & Coral */
+  --tab-dashboard-bg: #ecf3fc;
+  --tab-dashboard-bg-active: linear-gradient(135deg, #ecf3fc 0%, #e1ecfa 100%);
+  --tab-dashboard-fg: #184a7e;
+  --tab-dashboard-border: #c7dbf5;
 
-  --tab-schedules-bg: #f3efff;
-  --tab-schedules-bg-active: linear-gradient(135deg, #f3efff 0%, #eae3ff 100%);
-  --tab-schedules-fg: #6d28d9;
-  --tab-schedules-border: #ddd2fe;
+  --tab-schedules-bg: #fff2ee;
+  --tab-schedules-bg-active: linear-gradient(135deg, #fff2ee 0%, #ffe6df 100%);
+  --tab-schedules-fg: #d9482b;
+  --tab-schedules-border: #fcd5ca;
 
   --tab-audio-bg: #eafaf3;
   --tab-audio-bg-active: linear-gradient(135deg, #eafaf3 0%, #daf5e9 100%);
   --tab-audio-fg: #047857;
   --tab-audio-border: #bcecd5;
 
-  --tab-settings-bg: #fff5e8;
-  --tab-settings-bg-active: linear-gradient(135deg, #fff5e8 0%, #fdebd2 100%);
+  --tab-settings-bg: #fff6ea;
+  --tab-settings-bg-active: linear-gradient(135deg, #fff6ea 0%, #fdebd2 100%);
   --tab-settings-fg: #b45309;
   --tab-settings-border: #f8d8a8;
 }
@@ -96,30 +98,57 @@ textarea {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
 }
 
-.brand-mark {
-  width: 38px;
-  height: 38px;
+.brand-card {
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(24, 74, 126, 0.06);
+}
+
+.brand-logo-wrap {
+  width: 44px;
+  height: 44px;
   border-radius: 11px;
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  color: #fff;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  overflow: hidden;
   display: grid;
   place-items: center;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+  flex-shrink: 0;
+}
+
+.mobile-header .brand-logo-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.brand-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 60%;
+  transform: scale(1.16);
+  display: block;
 }
 
 .brand-title {
   margin: 0;
   font-size: 1rem;
   font-weight: 700;
+  color: var(--primary);
+  letter-spacing: -0.01em;
 }
 
 .brand-sub {
   margin: 0;
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  font-size: 0.74rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .main-content {
@@ -618,24 +647,24 @@ textarea {
   .sidebar-btn.tab-dashboard.active .nav-icon-wrap {
     background: #ffffff;
     color: var(--tab-dashboard-fg);
-    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.12);
+    box-shadow: 0 1px 4px rgba(24, 74, 126, 0.14);
   }
   .sidebar-btn.tab-dashboard.active {
     background: var(--tab-dashboard-bg-active);
     border-color: var(--tab-dashboard-border);
-    color: #1e40af;
+    color: #133c68;
   }
 
   .sidebar-btn.tab-schedules:hover .nav-icon-wrap,
   .sidebar-btn.tab-schedules.active .nav-icon-wrap {
     background: #ffffff;
     color: var(--tab-schedules-fg);
-    box-shadow: 0 1px 4px rgba(109, 40, 217, 0.12);
+    box-shadow: 0 1px 4px rgba(217, 72, 43, 0.14);
   }
   .sidebar-btn.tab-schedules.active {
     background: var(--tab-schedules-bg-active);
     border-color: var(--tab-schedules-border);
-    color: #5b21b6;
+    color: #b4361d;
   }
 
   .sidebar-btn.tab-audio:hover .nav-icon-wrap,
