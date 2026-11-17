@@ -13,3 +13,14 @@ build/bin/
 *.aab
 *.so
 *.syso
+
+# Android build artifacts, caches & IDE files
+.gradle/
+build/android/.gradle/
+build/android/build/
+build/android/app/build/
+build/android/.cxx/
+build/android/app/.cxx/
+build/android/local.properties
+*.keystore
+*.jks
