@@ -1,0 +1,9 @@
+{
+  "gopls": {
+    "build.directoryFilters": [
+      "-build/android",
+      "-build/ios",
+      "-frontend"
+    ]
+  }
+}

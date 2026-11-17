@@ -1,5 +1,6 @@
-//go:build ios
+//go:build ignore
 
+// Template overlay file used by Wails v3 during iOS builds; excluded from host gopls analysis.
 package main
 
 import (

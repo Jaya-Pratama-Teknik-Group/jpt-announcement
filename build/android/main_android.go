@@ -1,5 +1,6 @@
-//go:build android
+//go:build ignore
 
+// Template overlay file used by Wails v3 during Android c-shared builds; excluded from host gopls analysis.
 package main
 
 import "github.com/wailsapp/wails/v3/pkg/application"

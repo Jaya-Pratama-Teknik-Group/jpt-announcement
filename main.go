@@ -39,7 +39,7 @@ func main() {
 
 	var app *application.App
 	app = application.New(application.Options{
-		Name:        "JPT Announce",
+		Name:        "JPT Pengumuman Terjadwal",
 		Description: "Aplikasi Penjadwalan dan Pemutaran Pengumuman Audio",
 		Services: []application.Service{
 			application.NewService(svc),
@@ -53,7 +53,7 @@ func main() {
 	})
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "JPT Announce",
+		Title:     "JPT Pengumuman Terjadwal",
 		Width:     1120,
 		Height:    760,
 		MinWidth:  360,
