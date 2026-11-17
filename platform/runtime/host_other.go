@@ -20,6 +20,28 @@ type TrayHooks struct {
 	OnQuit         func()
 }
 
+// NotifyHooks defines playback control callbacks wired from OS notification actions.
+type NotifyHooks struct {
+	OnPause  func()
+	OnResume func()
+	OnStop   func()
+}
+
+type noopNotifier struct{}
+
+func (noopNotifier) NotifyPlayback(string, string, bool) {}
+func (noopNotifier) DismissPlayback()                    {}
+
+// ExtraServices returns platform-specific Wails services to register at app startup.
+func ExtraServices() []application.Service {
+	return nil
+}
+
+// SetupNotifier returns a safe no-op notifier for unsupported desktop platforms.
+func SetupNotifier(_ NotifyHooks) platform.Notifier {
+	return noopNotifier{}
+}
+
 type unsupportedStartup struct{}
 
 func (unsupportedStartup) Enable() error          { return errors.New("autostart hanya didukung di Windows") }

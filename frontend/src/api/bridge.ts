@@ -60,6 +60,15 @@ export const api = {
   playScheduleNow(scheduleId: string): Promise<void> {
     return invoke<void>("PlayScheduleNow", scheduleId);
   },
+  pauseAudio(): Promise<void> {
+    return invoke<void>("PauseAudio");
+  },
+  resumeAudio(): Promise<void> {
+    return invoke<void>("ResumeAudio");
+  },
+  togglePauseAudio(): Promise<void> {
+    return invoke<void>("TogglePauseAudio");
+  },
   stopAudio(): Promise<void> {
     return invoke<void>("StopAudio");
   },

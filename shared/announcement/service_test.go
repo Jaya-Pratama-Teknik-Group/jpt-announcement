@@ -14,12 +14,14 @@ import (
 type fakeAudio struct {
 	mu      sync.Mutex
 	playing bool
+	paused  bool
 	last    string
 }
 
 func (f *fakeAudio) Play(_ context.Context, filePath string, _ int, onFinish func(error)) error {
 	f.mu.Lock()
 	f.playing = true
+	f.paused = false
 	f.last = filePath
 	f.mu.Unlock()
 	if onFinish != nil {
@@ -27,6 +29,25 @@ func (f *fakeAudio) Play(_ context.Context, filePath string, _ int, onFinish fun
 	}
 	f.mu.Lock()
 	f.playing = false
+	f.paused = false
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeAudio) Pause() error {
+	f.mu.Lock()
+	if f.playing {
+		f.paused = true
+	}
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeAudio) Resume() error {
+	f.mu.Lock()
+	if f.playing {
+		f.paused = false
+	}
 	f.mu.Unlock()
 	return nil
 }
@@ -34,6 +55,7 @@ func (f *fakeAudio) Play(_ context.Context, filePath string, _ int, onFinish fun
 func (f *fakeAudio) Stop() error {
 	f.mu.Lock()
 	f.playing = false
+	f.paused = false
 	f.mu.Unlock()
 	return nil
 }
@@ -42,6 +64,12 @@ func (f *fakeAudio) IsPlaying() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.playing
+}
+
+func (f *fakeAudio) IsPaused() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.playing && f.paused
 }
 
 type fakeStartup struct {

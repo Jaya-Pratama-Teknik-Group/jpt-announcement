@@ -60,9 +60,11 @@ export interface NextAnnouncementInfo {
 
 export interface PlaybackState {
   isPlaying: boolean;
+  isPaused: boolean;
   audioId?: string;
   audioName?: string;
   scheduleId?: string;
+  scheduleTitle?: string;
   startedAt?: string;
 }
 

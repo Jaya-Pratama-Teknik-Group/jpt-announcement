@@ -107,11 +107,13 @@ type NextAnnouncementInfo struct {
 
 // PlaybackState tracks active audio output status.
 type PlaybackState struct {
-	IsPlaying  bool       `json:"isPlaying"`
-	AudioID    string     `json:"audioId,omitempty"`
-	AudioName  string     `json:"audioName,omitempty"`
-	ScheduleID string     `json:"scheduleId,omitempty"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	IsPlaying     bool       `json:"isPlaying"`
+	IsPaused      bool       `json:"isPaused"`
+	AudioID       string     `json:"audioId,omitempty"`
+	AudioName     string     `json:"audioName,omitempty"`
+	ScheduleID    string     `json:"scheduleId,omitempty"`
+	ScheduleTitle string     `json:"scheduleTitle,omitempty"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
 }
 
 // DashboardState aggregates runtime status for the UI dashboard and tray updates.

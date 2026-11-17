@@ -26,7 +26,9 @@ type BeepPlayer struct {
 
 	mu      sync.Mutex
 	playing bool
+	paused  bool
 	current beep.StreamCloser
+	ctrl    *beep.Ctrl
 	cancel  context.CancelFunc
 }
 
@@ -88,17 +90,23 @@ func (p *BeepPlayer) Play(ctx context.Context, filePath string, volume int, onFi
 		Volume:   volumeToGain(volume),
 		Silent:   volume <= 0,
 	}
+	ctrl := &beep.Ctrl{
+		Streamer: volEffect,
+		Paused:   false,
+	}
 
 	playCtx, cancel := context.WithCancel(ctx)
 
 	p.mu.Lock()
 	p.playing = true
+	p.paused = false
 	p.current = streamer
+	p.ctrl = ctrl
 	p.cancel = cancel
 	p.mu.Unlock()
 
 	done := make(chan struct{})
-	speaker.Play(beep.Seq(volEffect, beep.Callback(func() {
+	speaker.Play(beep.Seq(ctrl, beep.Callback(func() {
 		close(done)
 	})))
 
@@ -117,8 +125,12 @@ func (p *BeepPlayer) Play(ctx context.Context, filePath string, volume int, onFi
 		p.mu.Lock()
 		wasPlaying := p.playing
 		p.playing = false
+		p.paused = false
 		if p.current == streamer {
 			p.current = nil
+		}
+		if p.ctrl == ctrl {
+			p.ctrl = nil
 		}
 		p.cancel = nil
 		p.mu.Unlock()
@@ -131,11 +143,51 @@ func (p *BeepPlayer) Play(ctx context.Context, filePath string, volume int, onFi
 	return nil
 }
 
+// Pause temporarily pauses active audio playback without clearing the stream.
+func (p *BeepPlayer) Pause() error {
+	p.mu.Lock()
+	ctrl := p.ctrl
+	playing := p.playing
+	if playing && ctrl != nil {
+		p.paused = true
+	}
+	p.mu.Unlock()
+
+	if !playing || ctrl == nil {
+		return nil
+	}
+	speaker.Lock()
+	ctrl.Paused = true
+	speaker.Unlock()
+	return nil
+}
+
+// Resume continues paused audio playback from the current position.
+func (p *BeepPlayer) Resume() error {
+	p.mu.Lock()
+	ctrl := p.ctrl
+	playing := p.playing
+	if playing && ctrl != nil {
+		p.paused = false
+	}
+	p.mu.Unlock()
+
+	if !playing || ctrl == nil {
+		return nil
+	}
+	speaker.Lock()
+	ctrl.Paused = false
+	speaker.Unlock()
+	return nil
+}
+
 // Stop halts any active audio stream cleanly.
 func (p *BeepPlayer) Stop() error {
 	p.mu.Lock()
 	cancel := p.cancel
 	p.playing = false
+	p.paused = false
+	p.ctrl = nil
 	p.cancel = nil
 	p.mu.Unlock()
 
@@ -151,6 +203,13 @@ func (p *BeepPlayer) IsPlaying() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.playing
+}
+
+// IsPaused reports whether active audio playback is currently paused.
+func (p *BeepPlayer) IsPaused() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.playing && p.paused
 }
 
 func volumeToGain(volume int) float64 {

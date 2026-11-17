@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import logoImg from "../logo.jpg";
 import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
 import HugeIcon from "./components/HugeIcon.vue";
+import PlaybackNotificationModal from "./components/PlaybackNotificationModal.vue";
 import ScheduleModal from "./components/ScheduleModal.vue";
 import { api } from "./api/bridge";
 import type { HugeIconName } from "./icons/register";
@@ -54,6 +55,24 @@ const deleteDialog = ref<{
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const scheduleImportInputRef = ref<HTMLInputElement | null>(null);
 const countdownTick = ref(Date.now());
+const dismissedPlaybackKey = ref("");
+
+const currentPlaybackKey = computed(() => {
+  const pb = dashboard.value?.playback;
+  if (!pb?.isPlaying || !pb.scheduleId) return "";
+  return `${pb.scheduleId}:${pb.startedAt ?? ""}`;
+});
+
+const showPlaybackNotification = computed(() => {
+  if (!currentPlaybackKey.value) return false;
+  return dismissedPlaybackKey.value !== currentPlaybackKey.value;
+});
+
+function dismissPlaybackNotification() {
+  if (currentPlaybackKey.value) {
+    dismissedPlaybackKey.value = currentPlaybackKey.value;
+  }
+}
 
 let unsubState: (() => void) | null = null;
 let unsubNav: (() => void) | null = null;
@@ -372,6 +391,15 @@ async function handlePlayScheduleNow(scheduleId: string) {
   }
 }
 
+async function handleTogglePauseAudio() {
+  try {
+    await api.togglePauseAudio();
+    await refreshAll();
+  } catch (err) {
+    showError(err);
+  }
+}
+
 async function handleStopAudio() {
   try {
     await api.stopAudio();
@@ -525,6 +553,15 @@ onUnmounted(() => {
             </button>
             <button
               v-if="dashboard?.playback.isPlaying"
+              class="btn btn-soft-primary"
+              type="button"
+              @click="handleTogglePauseAudio"
+            >
+              <HugeIcon :name="dashboard.playback.isPaused ? 'play' : 'pause'" :size="17" />
+              <span>{{ dashboard.playback.isPaused ? "Lanjutkan" : "Jeda" }}</span>
+            </button>
+            <button
+              v-if="dashboard?.playback.isPlaying"
               class="btn btn-danger"
               type="button"
               @click="handleStopAudio"
@@ -592,9 +629,15 @@ onUnmounted(() => {
             </p>
             <span
               class="badge"
-              :class="dashboard?.playback.isPlaying ? 'badge-primary' : 'badge-muted'"
+              :class="dashboard?.playback.isPlaying ? (dashboard.playback.isPaused ? 'badge-warning' : 'badge-primary') : 'badge-muted'"
             >
-              {{ dashboard?.playback.isPlaying ? "Sedang diputar" : "Tidak ada audio" }}
+              {{
+                dashboard?.playback.isPlaying
+                  ? dashboard.playback.isPaused
+                    ? "Dijeda"
+                    : "Sedang diputar"
+                  : "Tidak ada audio"
+              }}
             </span>
           </div>
         </div>
@@ -1062,6 +1105,14 @@ onUnmounted(() => {
       :busy="busy"
       @close="deleteDialog.open = false"
       @confirm="confirmDeleteTarget"
+    />
+
+    <PlaybackNotificationModal
+      :open="showPlaybackNotification"
+      :playback="dashboard?.playback"
+      @toggle-pause="handleTogglePauseAudio"
+      @stop="handleStopAudio"
+      @dismiss="dismissPlaybackNotification"
     />
   </div>
 </template>

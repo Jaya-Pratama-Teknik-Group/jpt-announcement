@@ -40,14 +40,17 @@ func main() {
 		Capabilities: caps,
 	})
 
+	services := []application.Service{
+		application.NewService(svc),
+	}
+	services = append(services, platformrt.ExtraServices()...)
+
 	var app *application.App
 	app = application.New(application.Options{
 		Name:        "JPT Pengumuman Terjadwal",
 		Description: "Aplikasi Penjadwalan dan Pemutaran Pengumuman Audio",
 		Icon:        appIcon,
-		Services: []application.Service{
-			application.NewService(svc),
-		},
+		Services:    services,
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
@@ -80,6 +83,23 @@ func main() {
 
 	// Attach adapters into the already-registered service instance before starting scheduler.
 	svc = attachRuntimeAdapters(svc, store, logger, caps, audioPlayer, startupMgr, trayCtrl, app)
+	svc.SetNotifier(platformrt.SetupNotifier(platformrt.NotifyHooks{
+		OnPause: func() {
+			if err := svc.PauseAudio(); err != nil {
+				logger.Warn("notify", "Jeda audio dari notifikasi gagal: "+err.Error())
+			}
+		},
+		OnResume: func() {
+			if err := svc.ResumeAudio(); err != nil {
+				logger.Warn("notify", "Lanjutkan audio dari notifikasi gagal: "+err.Error())
+			}
+		},
+		OnStop: func() {
+			if err := svc.StopAudio(); err != nil {
+				logger.Warn("notify", "Hentikan audio dari notifikasi gagal: "+err.Error())
+			}
+		},
+	}))
 	_ = svc // svc pointer registered in Services was updated in place; see helper below.
 
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {

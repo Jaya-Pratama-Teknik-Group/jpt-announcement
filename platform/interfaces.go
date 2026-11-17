@@ -9,8 +9,17 @@ import (
 // AudioPlayer defines cross-platform audio playback operations implemented per target OS.
 type AudioPlayer interface {
 	Play(ctx context.Context, filePath string, volume int, onFinish func(error)) error
+	Pause() error
+	Resume() error
 	Stop() error
 	IsPlaying() bool
+	IsPaused() bool
+}
+
+// Notifier sends OS-level interactive notifications when scheduled audio plays.
+type Notifier interface {
+	NotifyPlayback(scheduleTitle, audioName string, paused bool)
+	DismissPlayback()
 }
 
 // StartupManager abstracts OS login autostart registration (active on Windows, no-op on Android).

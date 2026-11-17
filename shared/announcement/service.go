@@ -28,6 +28,7 @@ type Service struct {
 	audio            platform.AudioPlayer
 	startup          platform.StartupManager
 	tray             platform.TrayController
+	notifier         platform.Notifier
 	capabilities     domain.PlatformCapabilities
 	pickFile         FilePickerFunc
 	pickScheduleFile FilePickerFunc
@@ -46,6 +47,7 @@ type Options struct {
 	Audio        platform.AudioPlayer
 	Startup      platform.StartupManager
 	Tray         platform.TrayController
+	Notifier     platform.Notifier
 	Capabilities domain.PlatformCapabilities
 	PickFile     FilePickerFunc
 	OnChanged    func(domain.DashboardState)
@@ -59,6 +61,7 @@ func NewService(opts Options) *Service {
 		audio:        opts.Audio,
 		startup:      opts.Startup,
 		tray:         opts.Tray,
+		notifier:     opts.Notifier,
 		capabilities: opts.Capabilities,
 		pickFile:     opts.PickFile,
 		onChanged:    opts.OnChanged,
@@ -79,6 +82,11 @@ func (s *Service) SetAdapters(audio platform.AudioPlayer, startup platform.Start
 func (s *Service) SetTray(tray platform.TrayController) {
 	s.tray = tray
 	s.notifyChanged()
+}
+
+// SetNotifier attaches the platform notification controller after app creation.
+func (s *Service) SetNotifier(notifier platform.Notifier) {
+	s.notifier = notifier
 }
 
 // SetFilePicker sets the native file dialog callback.
@@ -124,6 +132,9 @@ func (s *Service) Shutdown() {
 	s.scheduler.Stop()
 	if s.audio != nil {
 		_ = s.audio.Stop()
+	}
+	if s.notifier != nil {
+		s.notifier.DismissPlayback()
 	}
 	s.logger.Info("service", "Aplikasi JPT Announce dihentikan")
 }
@@ -474,7 +485,7 @@ func (s *Service) DeleteAudioFile(id string) error {
 
 // PlayAudio plays a registered audio file at the specified volume (or default config volume if < 0).
 func (s *Service) PlayAudio(audioID string, volume int) error {
-	return s.playAsset(audioID, "", volume)
+	return s.playAsset(audioID, "", "", volume)
 }
 
 // PlayScheduleNow triggers a schedule immediately for manual testing.
@@ -485,7 +496,7 @@ func (s *Service) PlayScheduleNow(scheduleID string) error {
 	}
 	for _, sch := range schedules {
 		if sch.ID == scheduleID {
-			return s.playAsset(sch.AudioID, sch.ID, sch.Volume)
+			return s.playAsset(sch.AudioID, sch.ID, sch.Title, sch.Volume)
 		}
 	}
 	return fmt.Errorf("jadwal %q tidak ditemukan", scheduleID)
@@ -495,7 +506,7 @@ func (s *Service) PlayScheduleNow(scheduleID string) error {
 func (s *Service) PlayDefaultOrFirstAudio() error {
 	state, err := s.GetDashboardState()
 	if err == nil && state.NextAnnouncement != nil {
-		return s.playAsset(state.NextAnnouncement.AudioID, state.NextAnnouncement.ScheduleID, -1)
+		return s.playAsset(state.NextAnnouncement.AudioID, state.NextAnnouncement.ScheduleID, state.NextAnnouncement.Title, -1)
 	}
 	audios, err := s.store.ListAudio()
 	if err != nil {
@@ -504,7 +515,66 @@ func (s *Service) PlayDefaultOrFirstAudio() error {
 	if len(audios) == 0 {
 		return errors.New("belum ada berkas audio yang tersimpan")
 	}
-	return s.playAsset(audios[0].ID, "", -1)
+	return s.playAsset(audios[0].ID, "", "", -1)
+}
+
+// PauseAudio temporarily pauses active audio playback.
+func (s *Service) PauseAudio() error {
+	if s.audio == nil {
+		return nil
+	}
+	if err := s.audio.Pause(); err != nil {
+		return err
+	}
+	s.playMu.Lock()
+	if s.playback.IsPlaying {
+		s.playback.IsPaused = true
+	}
+	pb := s.playback
+	s.playMu.Unlock()
+	if pb.IsPlaying && pb.ScheduleID != "" && s.notifier != nil {
+		s.notifier.NotifyPlayback(pb.ScheduleTitle, pb.AudioName, true)
+	}
+	s.logger.Info("audio", "Pemutaran audio dijeda")
+	s.notifyChanged()
+	return nil
+}
+
+// ResumeAudio resumes paused audio playback.
+func (s *Service) ResumeAudio() error {
+	if s.audio == nil {
+		return nil
+	}
+	if err := s.audio.Resume(); err != nil {
+		return err
+	}
+	s.playMu.Lock()
+	if s.playback.IsPlaying {
+		s.playback.IsPaused = false
+	}
+	pb := s.playback
+	s.playMu.Unlock()
+	if pb.IsPlaying && pb.ScheduleID != "" && s.notifier != nil {
+		s.notifier.NotifyPlayback(pb.ScheduleTitle, pb.AudioName, false)
+	}
+	s.logger.Info("audio", "Pemutaran audio dilanjutkan")
+	s.notifyChanged()
+	return nil
+}
+
+// TogglePauseAudio pauses active audio if playing, or resumes if paused.
+func (s *Service) TogglePauseAudio() error {
+	s.playMu.RLock()
+	playing := s.playback.IsPlaying
+	paused := s.playback.IsPaused
+	s.playMu.RUnlock()
+	if !playing {
+		return nil
+	}
+	if paused {
+		return s.ResumeAudio()
+	}
+	return s.PauseAudio()
 }
 
 // StopAudio halts active playback immediately.
@@ -516,6 +586,9 @@ func (s *Service) StopAudio() error {
 	s.playMu.Lock()
 	s.playback = domain.PlaybackState{}
 	s.playMu.Unlock()
+	if s.notifier != nil {
+		s.notifier.DismissPlayback()
+	}
 	s.logger.Info("audio", "Pemutaran audio dihentikan")
 	s.notifyChanged()
 	return err
@@ -598,10 +671,10 @@ func (s *Service) ListLogs() []domain.LogEntry {
 
 func (s *Service) handleScheduledTrigger(sch domain.Schedule) error {
 	s.logger.Info("scheduler", fmt.Sprintf("Memutar pengumuman terjadwal: %s (%s)", sch.Title, time.Now().Format("15:04")))
-	return s.playAsset(sch.AudioID, sch.ID, sch.Volume)
+	return s.playAsset(sch.AudioID, sch.ID, sch.Title, sch.Volume)
 }
 
-func (s *Service) playAsset(audioID, scheduleID string, volume int) error {
+func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume int) error {
 	if s.audio == nil {
 		return errors.New("pemutar audio tidak tersedia pada perangkat ini")
 	}
@@ -621,11 +694,13 @@ func (s *Service) playAsset(audioID, scheduleID string, volume int) error {
 	now := time.Now()
 	s.playMu.Lock()
 	s.playback = domain.PlaybackState{
-		IsPlaying:  true,
-		AudioID:    asset.ID,
-		AudioName:  asset.Name,
-		ScheduleID: scheduleID,
-		StartedAt:  &now,
+		IsPlaying:     true,
+		IsPaused:      false,
+		AudioID:       asset.ID,
+		AudioName:     asset.Name,
+		ScheduleID:    scheduleID,
+		ScheduleTitle: scheduleTitle,
+		StartedAt:     &now,
 	}
 	s.playMu.Unlock()
 	s.notifyChanged()
@@ -639,17 +714,26 @@ func (s *Service) playAsset(audioID, scheduleID string, volume int) error {
 		s.playMu.Lock()
 		s.playback = domain.PlaybackState{}
 		s.playMu.Unlock()
+		if s.notifier != nil {
+			s.notifier.DismissPlayback()
+		}
 		s.notifyChanged()
 	})
 	if err != nil {
 		s.playMu.Lock()
 		s.playback = domain.PlaybackState{}
 		s.playMu.Unlock()
+		if s.notifier != nil {
+			s.notifier.DismissPlayback()
+		}
 		s.logger.Error("audio", fmt.Sprintf("Gagal memulai audio %q: %v", asset.Name, err))
 		s.notifyChanged()
 		return err
 	}
 
+	if scheduleID != "" && s.notifier != nil {
+		s.notifier.NotifyPlayback(scheduleTitle, asset.Name, false)
+	}
 	s.logger.Info("audio", fmt.Sprintf("Sedang memutar %q (volume %d%%)", asset.Name, volume))
 	return nil
 }

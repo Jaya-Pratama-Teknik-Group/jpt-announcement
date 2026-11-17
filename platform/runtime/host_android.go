@@ -8,6 +8,7 @@ import (
 	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/platform"
 	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/platform/android"
 	androidaudio "github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/platform/android/audio"
+	androidnotify "github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/platform/android/notify"
 	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/shared/domain"
 )
 
@@ -17,6 +18,23 @@ type TrayHooks struct {
 	OnPlayAudio    func()
 	OnOpenSettings func()
 	OnQuit         func()
+}
+
+// NotifyHooks defines playback control callbacks wired from OS notification actions.
+type NotifyHooks struct {
+	OnPause  func()
+	OnResume func()
+	OnStop   func()
+}
+
+// ExtraServices returns platform-specific Wails services to register at app startup.
+func ExtraServices() []application.Service {
+	return nil
+}
+
+// SetupNotifier constructs the Android local notification adapter.
+func SetupNotifier(_ NotifyHooks) platform.Notifier {
+	return androidnotify.NewNotifier()
 }
 
 // Capabilities returns runtime feature flags for experimental Android builds.
