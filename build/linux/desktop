@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=JPT Announce
+Comment=Aplikasi Penjadwalan dan Pemutaran Pengumuman Audio
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/JPTAnnounce %u
+Terminal=false
+Type=Application
+Icon=JPTAnnounce
+Categories=Utility;
+StartupWMClass=JPTAnnounce
+
+ 

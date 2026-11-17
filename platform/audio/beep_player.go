@@ -1,0 +1,164 @@
+package audio
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gopxl/beep/v2"
+	"github.com/gopxl/beep/v2/effects"
+	"github.com/gopxl/beep/v2/mp3"
+	"github.com/gopxl/beep/v2/speaker"
+	"github.com/gopxl/beep/v2/wav"
+)
+
+const targetSampleRate = beep.SampleRate(44100)
+
+// BeepPlayer implements platform.AudioPlayer using gopxl/beep/v2 (pure Go on Windows, Oboe on Android).
+type BeepPlayer struct {
+	initOnce sync.Once
+	initErr  error
+
+	mu      sync.Mutex
+	playing bool
+	current beep.StreamCloser
+	cancel  context.CancelFunc
+}
+
+// NewBeepPlayer constructs a reusable cross-platform beep audio player.
+func NewBeepPlayer() *BeepPlayer {
+	return &BeepPlayer{}
+}
+
+func (p *BeepPlayer) ensureSpeaker() error {
+	p.initOnce.Do(func() {
+		p.initErr = speaker.Init(targetSampleRate, targetSampleRate.N(time.Second/10))
+	})
+	return p.initErr
+}
+
+// Play decodes an MP3 or WAV file and plays it asynchronously, replacing any active playback.
+func (p *BeepPlayer) Play(ctx context.Context, filePath string, volume int, onFinish func(error)) error {
+	if err := p.ensureSpeaker(); err != nil {
+		return fmt.Errorf("gagal menginisialisasi perangkat audio: %w", err)
+	}
+
+	_ = p.Stop()
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("gagal membuka berkas audio: %w", err)
+	}
+
+	var streamSource io.ReadCloser = f
+	var streamer beep.StreamCloser
+	var format beep.Format
+	switch strings.ToLower(filepath.Ext(filePath)) {
+	case ".mp3", ".mpeg", ".mpga":
+		streamSource, err = prepareMPEGAudioStream(f)
+		if err != nil {
+			_ = f.Close()
+			return fmt.Errorf("gagal menyiapkan berkas audio MPEG: %w", err)
+		}
+		streamer, format, err = mp3.Decode(streamSource)
+	case ".wav":
+		streamer, format, err = wav.Decode(f)
+	default:
+		_ = f.Close()
+		return fmt.Errorf("format audio %q tidak didukung", filepath.Ext(filePath))
+	}
+	if err != nil {
+		_ = streamSource.Close()
+		return fmt.Errorf("gagal mendekode berkas audio (pastikan berkas .mp3/.mpeg berformat MPEG Layer III atau .wav): %w", err)
+	}
+
+	var stream beep.Streamer = streamer
+	if format.SampleRate != targetSampleRate {
+		stream = beep.Resample(3, format.SampleRate, targetSampleRate, streamer)
+	}
+
+	volEffect := &effects.Volume{
+		Streamer: stream,
+		Base:     2,
+		Volume:   volumeToGain(volume),
+		Silent:   volume <= 0,
+	}
+
+	playCtx, cancel := context.WithCancel(ctx)
+
+	p.mu.Lock()
+	p.playing = true
+	p.current = streamer
+	p.cancel = cancel
+	p.mu.Unlock()
+
+	done := make(chan struct{})
+	speaker.Play(beep.Seq(volEffect, beep.Callback(func() {
+		close(done)
+	})))
+
+	go func() {
+		defer func() {
+			_ = streamer.Close()
+			_ = streamSource.Close()
+		}()
+
+		select {
+		case <-done:
+		case <-playCtx.Done():
+			speaker.Clear()
+		}
+
+		p.mu.Lock()
+		wasPlaying := p.playing
+		p.playing = false
+		if p.current == streamer {
+			p.current = nil
+		}
+		p.cancel = nil
+		p.mu.Unlock()
+
+		if wasPlaying && onFinish != nil {
+			onFinish(nil)
+		}
+	}()
+
+	return nil
+}
+
+// Stop halts any active audio stream cleanly.
+func (p *BeepPlayer) Stop() error {
+	p.mu.Lock()
+	cancel := p.cancel
+	p.playing = false
+	p.cancel = nil
+	p.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	speaker.Clear()
+	return nil
+}
+
+// IsPlaying reports whether audio playback is currently active.
+func (p *BeepPlayer) IsPlaying() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.playing
+}
+
+func volumeToGain(volume int) float64 {
+	if volume <= 0 {
+		return -8
+	}
+	if volume >= 100 {
+		return 0
+	}
+	return -5.0 * (1.0 - float64(volume)/100.0)
+}

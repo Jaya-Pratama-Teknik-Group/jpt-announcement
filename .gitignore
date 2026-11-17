@@ -1,0 +1,15 @@
+# Workspace & AI collaboration
+biblio/
+
+# Build & dependencies
+.task/
+node_modules/
+frontend/dist/
+frontend/bindings/
+bin/
+build/bin/
+*.exe
+*.apk
+*.aab
+*.so
+*.syso

@@ -1,0 +1,487 @@
+package announcement
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/platform"
+	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/shared/config"
+	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/shared/domain"
+	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/shared/logging"
+	"github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/shared/scheduler"
+)
+
+// FilePickerFunc opens a native OS file dialog when supported and returns the chosen path.
+type FilePickerFunc func() (string, error)
+
+// Service orchestrates schedules, audio library, playback, settings, and platform integrations.
+type Service struct {
+	store        *config.Store
+	logger       *logging.Logger
+	audio        platform.AudioPlayer
+	startup      platform.StartupManager
+	tray         platform.TrayController
+	capabilities domain.PlatformCapabilities
+	pickFile     FilePickerFunc
+	onChanged    func(domain.DashboardState)
+	scheduler    *scheduler.Scheduler
+
+	playMu   sync.RWMutex
+	playback domain.PlaybackState
+}
+
+// Options wires platform-specific adapters into the shared application service.
+type Options struct {
+	Store        *config.Store
+	Logger       *logging.Logger
+	Audio        platform.AudioPlayer
+	Startup      platform.StartupManager
+	Tray         platform.TrayController
+	Capabilities domain.PlatformCapabilities
+	PickFile     FilePickerFunc
+	OnChanged    func(domain.DashboardState)
+}
+
+// NewService constructs a ready-to-use Service and attaches the shared scheduler.
+func NewService(opts Options) *Service {
+	svc := &Service{
+		store:        opts.Store,
+		logger:       opts.Logger,
+		audio:        opts.Audio,
+		startup:      opts.Startup,
+		tray:         opts.Tray,
+		capabilities: opts.Capabilities,
+		pickFile:     opts.PickFile,
+		onChanged:    opts.OnChanged,
+	}
+	svc.scheduler = scheduler.New(opts.Store, opts.Logger, svc.handleScheduledTrigger)
+	return svc
+}
+
+// SetAdapters attaches platform-specific audio, startup, and tray adapters after app creation.
+func (s *Service) SetAdapters(audio platform.AudioPlayer, startup platform.StartupManager, tray platform.TrayController) {
+	s.audio = audio
+	s.startup = startup
+	s.tray = tray
+	s.notifyChanged()
+}
+
+// SetTray attaches or replaces the tray controller after window initialization.
+func (s *Service) SetTray(tray platform.TrayController) {
+	s.tray = tray
+	s.notifyChanged()
+}
+
+// SetFilePicker sets the native file dialog callback.
+func (s *Service) SetFilePicker(fn FilePickerFunc) {
+	s.pickFile = fn
+}
+
+// SetOnChanged registers a listener invoked whenever dashboard state changes.
+func (s *Service) SetOnChanged(fn func(domain.DashboardState)) {
+	s.onChanged = fn
+}
+
+// Start initializes scheduler state according to persisted settings and syncs autostart status.
+func (s *Service) Start() {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		s.logger.Error("service", "Gagal memuat pengaturan awal: "+err.Error())
+		cfg = domain.DefaultAppConfig()
+	}
+
+	if s.capabilities.SupportsAutostart && s.startup != nil {
+		if actual, err := s.startup.IsEnabled(); err == nil && actual != cfg.AutostartEnabled {
+			cfg.AutostartEnabled = actual
+			_ = s.store.SaveConfig(cfg)
+		}
+	}
+
+	if cfg.SchedulerEnabled {
+		s.scheduler.Start()
+	}
+	s.logger.Info("service", "Aplikasi JPT Announce siap dijalankan pada platform "+s.capabilities.Platform)
+	s.notifyChanged()
+}
+
+// Shutdown stops background scheduling and any active audio cleanly.
+func (s *Service) Shutdown() {
+	s.scheduler.Stop()
+	if s.audio != nil {
+		_ = s.audio.Stop()
+	}
+	s.logger.Info("service", "Aplikasi JPT Announce dihentikan")
+}
+
+// GetDashboardState returns aggregated status for the UI and tray.
+func (s *Service) GetDashboardState() (domain.DashboardState, error) {
+	schedules, err := s.store.ListSchedules()
+	if err != nil {
+		return domain.DashboardState{}, err
+	}
+	audios, err := s.store.ListAudio()
+	if err != nil {
+		return domain.DashboardState{}, err
+	}
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return domain.DashboardState{}, err
+	}
+
+	autostartEnabled := cfg.AutostartEnabled
+	if s.capabilities.SupportsAutostart && s.startup != nil {
+		if enabled, err := s.startup.IsEnabled(); err == nil {
+			autostartEnabled = enabled
+		}
+	}
+
+	audioNames := make(map[string]string, len(audios))
+	for _, a := range audios {
+		audioNames[a.ID] = a.Name
+	}
+
+	activeCount := 0
+	for _, sch := range schedules {
+		if sch.Enabled {
+			activeCount++
+		}
+	}
+
+	next := scheduler.FindNextAnnouncement(schedules, audioNames, time.Now())
+
+	s.playMu.RLock()
+	pb := s.playback
+	s.playMu.RUnlock()
+
+	return domain.DashboardState{
+		Platform:            s.capabilities,
+		SchedulerRunning:    s.scheduler.IsRunning(),
+		AutostartEnabled:    autostartEnabled,
+		ActiveScheduleCount: activeCount,
+		TotalScheduleCount:  len(schedules),
+		TotalAudioCount:     len(audios),
+		NextAnnouncement:    next,
+		Playback:            pb,
+	}, nil
+}
+
+// ListSchedules returns all configured announcement schedules.
+func (s *Service) ListSchedules() ([]domain.Schedule, error) {
+	return s.store.ListSchedules()
+}
+
+// SaveSchedule creates or updates a schedule after verifying the referenced audio exists.
+func (s *Service) SaveSchedule(item domain.Schedule) (domain.Schedule, error) {
+	if _, err := s.store.GetAudio(item.AudioID); err != nil {
+		return domain.Schedule{}, errors.New("berkas audio yang dipilih tidak ditemukan")
+	}
+	saved, err := s.store.SaveSchedule(item)
+	if err != nil {
+		return domain.Schedule{}, err
+	}
+	s.logger.Info("jadwal", fmt.Sprintf("Jadwal %q (%s) disimpan", saved.Title, saved.TimeOfDay))
+	s.notifyChanged()
+	return saved, nil
+}
+
+// ToggleSchedule enables or disables an existing schedule.
+func (s *Service) ToggleSchedule(id string, enabled bool) (domain.Schedule, error) {
+	items, err := s.store.ListSchedules()
+	if err != nil {
+		return domain.Schedule{}, err
+	}
+	for _, item := range items {
+		if item.ID == id {
+			item.Enabled = enabled
+			saved, err := s.store.SaveSchedule(item)
+			if err != nil {
+				return domain.Schedule{}, err
+			}
+			status := "dinonaktifkan"
+			if enabled {
+				status = "diaktifkan"
+			}
+			s.logger.Info("jadwal", fmt.Sprintf("Jadwal %q %s", saved.Title, status))
+			s.notifyChanged()
+			return saved, nil
+		}
+	}
+	return domain.Schedule{}, fmt.Errorf("jadwal %q tidak ditemukan", id)
+}
+
+// DeleteSchedule removes a schedule by ID.
+func (s *Service) DeleteSchedule(id string) error {
+	if err := s.store.DeleteSchedule(id); err != nil {
+		return err
+	}
+	s.logger.Info("jadwal", "Jadwal pengumuman dihapus ("+id+")")
+	s.notifyChanged()
+	return nil
+}
+
+// ListAudioFiles returns all imported local audio assets.
+func (s *Service) ListAudioFiles() ([]domain.AudioAsset, error) {
+	return s.store.ListAudio()
+}
+
+// ImportAudioFromPath copies a local .mp3 or .wav file into managed storage.
+func (s *Service) ImportAudioFromPath(sourcePath, displayName string) (domain.AudioAsset, error) {
+	asset, err := s.store.ImportAudioFile(sourcePath, displayName)
+	if err != nil {
+		return domain.AudioAsset{}, err
+	}
+	s.logger.Info("audio", fmt.Sprintf("Audio %q (%s) ditambahkan", asset.Name, asset.Format))
+	s.notifyChanged()
+	return asset, nil
+}
+
+// ImportAudioBase64 stores an audio file uploaded from the WebView file picker.
+func (s *Service) ImportAudioBase64(fileName, displayName, base64Data string) (domain.AudioAsset, error) {
+	raw, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return domain.AudioAsset{}, errors.New("data berkas audio tidak valid")
+	}
+	asset, err := s.store.ImportAudioBytes(fileName, displayName, raw)
+	if err != nil {
+		return domain.AudioAsset{}, err
+	}
+	s.logger.Info("audio", fmt.Sprintf("Audio %q (%s) diunggah", asset.Name, asset.Format))
+	s.notifyChanged()
+	return asset, nil
+}
+
+// PickAndImportAudio triggers the native desktop file picker when supported.
+func (s *Service) PickAndImportAudio() (*domain.AudioAsset, error) {
+	if !s.capabilities.SupportsNativeFilePicker || s.pickFile == nil {
+		return nil, errors.New("pemilih berkas native tidak tersedia pada platform ini")
+	}
+	path, err := s.pickFile()
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, nil
+	}
+	asset, err := s.ImportAudioFromPath(path, "")
+	if err != nil {
+		return nil, err
+	}
+	return &asset, nil
+}
+
+// DeleteAudioFile deletes an unused audio asset.
+func (s *Service) DeleteAudioFile(id string) error {
+	if err := s.store.DeleteAudio(id); err != nil {
+		return err
+	}
+	s.logger.Info("audio", "Berkas audio dihapus ("+id+")")
+	s.notifyChanged()
+	return nil
+}
+
+// PlayAudio plays a registered audio file at the specified volume (or default config volume if < 0).
+func (s *Service) PlayAudio(audioID string, volume int) error {
+	return s.playAsset(audioID, "", volume)
+}
+
+// PlayScheduleNow triggers a schedule immediately for manual testing.
+func (s *Service) PlayScheduleNow(scheduleID string) error {
+	schedules, err := s.store.ListSchedules()
+	if err != nil {
+		return err
+	}
+	for _, sch := range schedules {
+		if sch.ID == scheduleID {
+			return s.playAsset(sch.AudioID, sch.ID, sch.Volume)
+		}
+	}
+	return fmt.Errorf("jadwal %q tidak ditemukan", scheduleID)
+}
+
+// PlayDefaultOrFirstAudio plays the next upcoming schedule's audio or the first available audio file.
+func (s *Service) PlayDefaultOrFirstAudio() error {
+	state, err := s.GetDashboardState()
+	if err == nil && state.NextAnnouncement != nil {
+		return s.playAsset(state.NextAnnouncement.AudioID, state.NextAnnouncement.ScheduleID, -1)
+	}
+	audios, err := s.store.ListAudio()
+	if err != nil {
+		return err
+	}
+	if len(audios) == 0 {
+		return errors.New("belum ada berkas audio yang tersimpan")
+	}
+	return s.playAsset(audios[0].ID, "", -1)
+}
+
+// StopAudio halts active playback immediately.
+func (s *Service) StopAudio() error {
+	if s.audio == nil {
+		return nil
+	}
+	err := s.audio.Stop()
+	s.playMu.Lock()
+	s.playback = domain.PlaybackState{}
+	s.playMu.Unlock()
+	s.logger.Info("audio", "Pemutaran audio dihentikan")
+	s.notifyChanged()
+	return err
+}
+
+// GetSettings returns current persistent settings synced with OS autostart state.
+func (s *Service) GetSettings() (domain.AppConfig, error) {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return domain.AppConfig{}, err
+	}
+	if s.capabilities.SupportsAutostart && s.startup != nil {
+		if enabled, err := s.startup.IsEnabled(); err == nil {
+			cfg.AutostartEnabled = enabled
+		}
+	}
+	return cfg, nil
+}
+
+// UpdateSettings persists settings and toggles scheduler / autostart accordingly.
+func (s *Service) UpdateSettings(cfg domain.AppConfig) (domain.AppConfig, error) {
+	if s.capabilities.SupportsAutostart && s.startup != nil {
+		if _, err := s.SetAutostartEnabled(cfg.AutostartEnabled); err != nil {
+			return domain.AppConfig{}, err
+		}
+	} else {
+		cfg.AutostartEnabled = false
+	}
+
+	if err := s.store.SaveConfig(cfg); err != nil {
+		return domain.AppConfig{}, err
+	}
+	if cfg.SchedulerEnabled {
+		s.scheduler.Start()
+	} else {
+		s.scheduler.Stop()
+	}
+	s.logger.Info("pengaturan", "Pengaturan aplikasi diperbarui")
+	s.notifyChanged()
+	return cfg, nil
+}
+
+// SetAutostartEnabled toggles OS login autostart via platform StartupManager.
+func (s *Service) SetAutostartEnabled(enabled bool) (bool, error) {
+	if !s.capabilities.SupportsAutostart || s.startup == nil {
+		return false, errors.New("fitur autostart hanya tersedia pada platform Windows")
+	}
+	var err error
+	if enabled {
+		err = s.startup.Enable()
+	} else {
+		err = s.startup.Disable()
+	}
+	if err != nil {
+		s.logger.Error("autostart", "Gagal mengubah status autostart: "+err.Error())
+		return false, err
+	}
+	actual, err := s.startup.IsEnabled()
+	if err != nil {
+		actual = enabled
+	}
+	cfg, cfgErr := s.store.LoadConfig()
+	if cfgErr == nil {
+		cfg.AutostartEnabled = actual
+		_ = s.store.SaveConfig(cfg)
+	}
+	if actual {
+		s.logger.Info("autostart", "Jalankan otomatis saat Windows dimulai diaktifkan")
+	} else {
+		s.logger.Info("autostart", "Jalankan otomatis saat Windows dimulai dinonaktifkan")
+	}
+	s.notifyChanged()
+	return actual, nil
+}
+
+// ListLogs returns recent application logs newest-first.
+func (s *Service) ListLogs() []domain.LogEntry {
+	return s.logger.List()
+}
+
+func (s *Service) handleScheduledTrigger(sch domain.Schedule) error {
+	s.logger.Info("scheduler", fmt.Sprintf("Memutar pengumuman terjadwal: %s (%s)", sch.Title, sch.TimeOfDay))
+	return s.playAsset(sch.AudioID, sch.ID, sch.Volume)
+}
+
+func (s *Service) playAsset(audioID, scheduleID string, volume int) error {
+	if s.audio == nil {
+		return errors.New("pemutar audio tidak tersedia pada perangkat ini")
+	}
+	asset, err := s.store.GetAudio(audioID)
+	if err != nil {
+		return err
+	}
+	if volume < 0 || volume > 100 {
+		cfg, cfgErr := s.store.LoadConfig()
+		if cfgErr == nil {
+			volume = cfg.DefaultVolume
+		} else {
+			volume = 85
+		}
+	}
+
+	now := time.Now()
+	s.playMu.Lock()
+	s.playback = domain.PlaybackState{
+		IsPlaying:  true,
+		AudioID:    asset.ID,
+		AudioName:  asset.Name,
+		ScheduleID: scheduleID,
+		StartedAt:  &now,
+	}
+	s.playMu.Unlock()
+	s.notifyChanged()
+
+	err = s.audio.Play(context.Background(), asset.FilePath, volume, func(playErr error) {
+		if playErr != nil {
+			s.logger.Error("audio", fmt.Sprintf("Kesalahan pemutaran %q: %v", asset.Name, playErr))
+		} else {
+			s.logger.Info("audio", fmt.Sprintf("Selesai memutar %q", asset.Name))
+		}
+		s.playMu.Lock()
+		s.playback = domain.PlaybackState{}
+		s.playMu.Unlock()
+		s.notifyChanged()
+	})
+	if err != nil {
+		s.playMu.Lock()
+		s.playback = domain.PlaybackState{}
+		s.playMu.Unlock()
+		s.logger.Error("audio", fmt.Sprintf("Gagal memulai audio %q: %v", asset.Name, err))
+		s.notifyChanged()
+		return err
+	}
+
+	s.logger.Info("audio", fmt.Sprintf("Sedang memutar %q (volume %d%%)", asset.Name, volume))
+	return nil
+}
+
+func (s *Service) notifyChanged() {
+	state, err := s.GetDashboardState()
+	if err != nil {
+		return
+	}
+	if s.tray != nil {
+		if state.NextAnnouncement != nil {
+			s.tray.UpdateNextAnnouncement(fmt.Sprintf(
+				"Pengumuman berikutnya: %s (%s)",
+				state.NextAnnouncement.Title,
+				state.NextAnnouncement.ScheduledAt.Format("15:04"),
+			))
+		} else {
+			s.tray.UpdateNextAnnouncement("Pengumuman berikutnya: Tidak ada")
+		}
+	}
+	if s.onChanged != nil {
+		s.onChanged(state)
+	}
+}

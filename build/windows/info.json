@@ -1,0 +1,17 @@
+{
+	"fixed": {
+		"file_version": "0.1.0",
+		"product_version": "0.1.0"
+	},
+	"info": {
+		"0409": {
+			"FileVersion": "0.1.0",
+			"ProductVersion": "0.1.0",
+			"CompanyName": "JPT",
+			"FileDescription": "Aplikasi Penjadwalan dan Pemutaran Pengumuman Audio",
+			"LegalCopyright": "Copyright (c) 2026 JPT",
+			"ProductName": "JPT Announce",
+			"Comments": "Penjadwalan Pengumuman Audio Lintas Platform"
+		}
+	}
+}
