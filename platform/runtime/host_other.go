@@ -14,6 +14,7 @@ import (
 
 // TrayHooks defines callbacks wired from desktop tray into shared services.
 type TrayHooks struct {
+	Icon           []byte
 	OnPlayAudio    func()
 	OnOpenSettings func()
 	OnQuit         func()

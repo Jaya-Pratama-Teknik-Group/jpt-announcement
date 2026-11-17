@@ -16,13 +16,32 @@ type Schedule struct {
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
 	AudioID         string     `json:"audioId"`
-	TimeOfDay       string     `json:"timeOfDay"` // Format "HH:MM" (24-jam)
-	Days            []int      `json:"days"`      // 0=Minggu .. 6=Sabtu; kosong = setiap hari
+	TimeOfDay       string     `json:"timeOfDay"`            // Format "HH:MM" (24-jam); fallback/jam pertama
+	TimesOfDay      []string   `json:"timesOfDay,omitempty"` // Daftar jam "HH:MM" (24-jam), bisa lebih dari satu
+	Days            []int      `json:"days"`                 // 0=Minggu .. 6=Sabtu; kosong = setiap hari
 	Enabled         bool       `json:"enabled"`
 	Volume          int        `json:"volume"` // 0..100
 	LastTriggeredAt *time.Time `json:"lastTriggeredAt,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
+}
+
+// ScheduleExportItem holds portable schedule fields without machine-local audio IDs.
+type ScheduleExportItem struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	AudioName   string   `json:"audioName,omitempty"`
+	TimeOfDay   string   `json:"timeOfDay,omitempty"`
+	TimesOfDay  []string `json:"timesOfDay,omitempty"`
+	Days        []int    `json:"days"`
+	Volume      int      `json:"volume"`
+}
+
+// ScheduleExportBundle is the portable JSON format for exporting and importing schedules.
+type ScheduleExportBundle struct {
+	Version    int                  `json:"version"`
+	ExportedAt time.Time            `json:"exportedAt"`
+	Schedules  []ScheduleExportItem `json:"schedules"`
 }
 
 // AudioAsset describes a validated local audio file managed by the application.
@@ -124,15 +143,54 @@ func ParseTimeOfDay(hhmm string) (int, int, error) {
 	return hour, minute, nil
 }
 
+// NormalizeScheduleTimes validates, formats, deduplicates, and sorts schedule times.
+// It accepts either TimesOfDay or the legacy single TimeOfDay field.
+func NormalizeScheduleTimes(timeOfDay string, timesOfDay []string) ([]string, error) {
+	raw := timesOfDay
+	if len(raw) == 0 && strings.TrimSpace(timeOfDay) != "" {
+		raw = []string{timeOfDay}
+	}
+	if len(raw) == 0 {
+		return nil, errors.New("minimal satu jam pengumuman wajib diisi")
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	normalized := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		hour, minute, err := ParseTimeOfDay(entry)
+		if err != nil {
+			return nil, err
+		}
+		formatted := fmt.Sprintf("%02d:%02d", hour, minute)
+		if _, exists := seen[formatted]; exists {
+			continue
+		}
+		seen[formatted] = struct{}{}
+		normalized = append(normalized, formatted)
+	}
+	slices.Sort(normalized)
+	return normalized, nil
+}
+
+// EffectiveTimes returns the schedule's normalized time list, falling back to TimeOfDay.
+func (s Schedule) EffectiveTimes() []string {
+	times, err := NormalizeScheduleTimes(s.TimeOfDay, s.TimesOfDay)
+	if err != nil {
+		return nil
+	}
+	return times
+}
+
 // ValidateSchedule checks schedule fields and returns an Indonesian error message if invalid.
+// A schedule without an audio asset may exist only while disabled (e.g. freshly imported).
 func ValidateSchedule(s Schedule) error {
 	if strings.TrimSpace(s.Title) == "" {
 		return errors.New("judul pengumuman wajib diisi")
 	}
-	if strings.TrimSpace(s.AudioID) == "" {
-		return errors.New("berkas audio wajib dipilih")
+	if s.Enabled && strings.TrimSpace(s.AudioID) == "" {
+		return errors.New("pilih berkas audio terlebih dahulu sebelum mengaktifkan jadwal")
 	}
-	if _, _, err := ParseTimeOfDay(s.TimeOfDay); err != nil {
+	if _, err := NormalizeScheduleTimes(s.TimeOfDay, s.TimesOfDay); err != nil {
 		return err
 	}
 	for _, day := range s.Days {

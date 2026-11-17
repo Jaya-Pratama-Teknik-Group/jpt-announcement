@@ -60,17 +60,20 @@ func TestStoreConfigSchedulesAndAudio(t *testing.T) {
 		t.Fatal("expected error for unsupported .m4a format")
 	}
 
-	// Save schedule referencing asset
+	// Save schedule with multiple times referencing asset
 	sch, err := store.SaveSchedule(domain.Schedule{
-		Title:     "Bel Pagi",
-		AudioID:   asset.ID,
-		TimeOfDay: "07:00",
-		Days:      []int{1, 2, 3, 4, 5},
-		Enabled:   true,
-		Volume:    80,
+		Title:      "Bel Pagi",
+		AudioID:    asset.ID,
+		TimesOfDay: []string{"12:00", "07:00", "07:00"},
+		Days:       []int{1, 2, 3, 4, 5},
+		Enabled:    true,
+		Volume:     80,
 	})
 	if err != nil {
 		t.Fatalf("SaveSchedule failed: %v", err)
+	}
+	if len(sch.TimesOfDay) != 2 || sch.TimesOfDay[0] != "07:00" || sch.TimesOfDay[1] != "12:00" || sch.TimeOfDay != "07:00" {
+		t.Fatalf("expected deduplicated sorted times [07:00 12:00], got %+v (timeOfDay=%q)", sch.TimesOfDay, sch.TimeOfDay)
 	}
 
 	// Deleting audio referenced by schedule must fail

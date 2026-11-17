@@ -14,6 +14,7 @@ import (
 
 // TrayHooks defines callbacks wired from the platform tray into shared services.
 type TrayHooks struct {
+	Icon           []byte
 	OnPlayAudio    func()
 	OnOpenSettings func()
 	OnQuit         func()
@@ -38,6 +39,7 @@ func SetupAdapters(app *application.App, window *application.WebviewWindow, hook
 	audioPlayer := winaudio.NewPlayer()
 	startupMgr := winstartup.NewManager(app)
 	trayCtrl := wintray.NewController(app, window, wintray.Actions{
+		Icon:           hooks.Icon,
 		OnPlayAudio:    hooks.OnPlayAudio,
 		OnOpenSettings: hooks.OnOpenSettings,
 		OnQuit:         hooks.OnQuit,

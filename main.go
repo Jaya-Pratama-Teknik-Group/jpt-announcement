@@ -21,6 +21,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func main() {
 	startHidden := slices.Contains(os.Args[1:], "--hidden") || slices.Contains(os.Args[1:], "--minimized")
 
@@ -41,6 +44,7 @@ func main() {
 	app = application.New(application.Options{
 		Name:        "JPT Pengumuman Terjadwal",
 		Description: "Aplikasi Penjadwalan dan Pemutaran Pengumuman Audio",
+		Icon:        appIcon,
 		Services: []application.Service{
 			application.NewService(svc),
 		},
@@ -63,6 +67,7 @@ func main() {
 	})
 
 	audioPlayer, startupMgr, trayCtrl := platformrt.SetupAdapters(app, window, platformrt.TrayHooks{
+		Icon: appIcon,
 		OnPlayAudio: func() {
 			if err := svc.PlayDefaultOrFirstAudio(); err != nil {
 				logger.Warn("tray", "Putar audio dari tray gagal: "+err.Error())
@@ -105,6 +110,25 @@ func attachRuntimeAdapters(
 				AddFilter("Berkas Audio (*.mp3;*.mpeg;*.mpga;*.wav)", "*.mp3;*.mpeg;*.mpga;*.wav").
 				PromptForSingleSelection()
 		})
+		svc.SetScheduleFilePickers(
+			func() (string, error) {
+				return app.Dialog.OpenFile().
+					SetTitle("Impor Konfigurasi Jadwal").
+					AddFilter("Konfigurasi JSON (*.json)", "*.json").
+					PromptForSingleSelection()
+			},
+			func() (string, error) {
+				d := app.Dialog.SaveFile()
+				d.SetOptions(&application.SaveFileDialogOptions{
+					Title:    "Ekspor Konfigurasi Jadwal",
+					Filename: "jpt-announce-jadwal.json",
+					Filters: []application.FileFilter{
+						{DisplayName: "Konfigurasi JSON (*.json)", Pattern: "*.json"},
+					},
+				})
+				return d.PromptForSingleSelection()
+			},
+		)
 	}
 	svc.SetOnChanged(func(state domain.DashboardState) {
 		app.Event.Emit("state:updated", state)

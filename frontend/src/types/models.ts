@@ -3,7 +3,8 @@ export interface Schedule {
   title: string;
   description: string;
   audioId: string;
-  timeOfDay: string; // "HH:MM"
+  timeOfDay: string; // "HH:MM" (jam pertama)
+  timesOfDay: string[]; // daftar jam "HH:MM"
   days: number[]; // 0=Minggu .. 6=Sabtu; kosong = setiap hari
   enabled: boolean;
   volume: number;

@@ -3,8 +3,11 @@ package announcement
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,15 +23,17 @@ type FilePickerFunc func() (string, error)
 
 // Service orchestrates schedules, audio library, playback, settings, and platform integrations.
 type Service struct {
-	store        *config.Store
-	logger       *logging.Logger
-	audio        platform.AudioPlayer
-	startup      platform.StartupManager
-	tray         platform.TrayController
-	capabilities domain.PlatformCapabilities
-	pickFile     FilePickerFunc
-	onChanged    func(domain.DashboardState)
-	scheduler    *scheduler.Scheduler
+	store            *config.Store
+	logger           *logging.Logger
+	audio            platform.AudioPlayer
+	startup          platform.StartupManager
+	tray             platform.TrayController
+	capabilities     domain.PlatformCapabilities
+	pickFile         FilePickerFunc
+	pickScheduleFile FilePickerFunc
+	saveScheduleFile FilePickerFunc
+	onChanged        func(domain.DashboardState)
+	scheduler        *scheduler.Scheduler
 
 	playMu   sync.RWMutex
 	playback domain.PlaybackState
@@ -79,6 +84,12 @@ func (s *Service) SetTray(tray platform.TrayController) {
 // SetFilePicker sets the native file dialog callback.
 func (s *Service) SetFilePicker(fn FilePickerFunc) {
 	s.pickFile = fn
+}
+
+// SetScheduleFilePickers sets native open and save file dialog callbacks for schedule import/export.
+func (s *Service) SetScheduleFilePickers(openFn, saveFn FilePickerFunc) {
+	s.pickScheduleFile = openFn
+	s.saveScheduleFile = saveFn
 }
 
 // SetOnChanged registers a listener invoked whenever dashboard state changes.
@@ -174,21 +185,30 @@ func (s *Service) ListSchedules() ([]domain.Schedule, error) {
 	return s.store.ListSchedules()
 }
 
-// SaveSchedule creates or updates a schedule after verifying the referenced audio exists.
+// SaveSchedule creates or updates a schedule after verifying the referenced audio exists when assigned.
+// Schedules without audio cannot be enabled until the user selects an audio file.
 func (s *Service) SaveSchedule(item domain.Schedule) (domain.Schedule, error) {
-	if _, err := s.store.GetAudio(item.AudioID); err != nil {
-		return domain.Schedule{}, errors.New("berkas audio yang dipilih tidak ditemukan")
+	audioID := strings.TrimSpace(item.AudioID)
+	if audioID != "" {
+		if _, err := s.store.GetAudio(audioID); err != nil {
+			return domain.Schedule{}, errors.New("berkas audio yang dipilih tidak ditemukan")
+		}
+	} else if item.Enabled {
+		return domain.Schedule{}, errors.New("pilih berkas audio terlebih dahulu sebelum mengaktifkan jadwal")
 	}
+	item.AudioID = audioID
+
 	saved, err := s.store.SaveSchedule(item)
 	if err != nil {
 		return domain.Schedule{}, err
 	}
-	s.logger.Info("jadwal", fmt.Sprintf("Jadwal %q (%s) disimpan", saved.Title, saved.TimeOfDay))
+	s.logger.Info("jadwal", fmt.Sprintf("Jadwal %q (%s) disimpan", saved.Title, strings.Join(saved.TimesOfDay, ", ")))
 	s.notifyChanged()
 	return saved, nil
 }
 
 // ToggleSchedule enables or disables an existing schedule.
+// Enabling requires a valid assigned audio asset.
 func (s *Service) ToggleSchedule(id string, enabled bool) (domain.Schedule, error) {
 	items, err := s.store.ListSchedules()
 	if err != nil {
@@ -196,6 +216,14 @@ func (s *Service) ToggleSchedule(id string, enabled bool) (domain.Schedule, erro
 	}
 	for _, item := range items {
 		if item.ID == id {
+			if enabled {
+				if strings.TrimSpace(item.AudioID) == "" {
+					return domain.Schedule{}, errors.New("pilih berkas audio terlebih dahulu sebelum mengaktifkan jadwal")
+				}
+				if _, err := s.store.GetAudio(item.AudioID); err != nil {
+					return domain.Schedule{}, errors.New("berkas audio jadwal tidak ditemukan; pilih audio baru terlebih dahulu")
+				}
+			}
 			item.Enabled = enabled
 			saved, err := s.store.SaveSchedule(item)
 			if err != nil {
@@ -211,6 +239,167 @@ func (s *Service) ToggleSchedule(id string, enabled bool) (domain.Schedule, erro
 		}
 	}
 	return domain.Schedule{}, fmt.Errorf("jadwal %q tidak ditemukan", id)
+}
+
+// ExportSchedulesJSON serializes all configured schedules into a portable JSON bundle.
+func (s *Service) ExportSchedulesJSON() (string, error) {
+	schedules, err := s.store.ListSchedules()
+	if err != nil {
+		return "", err
+	}
+	if len(schedules) == 0 {
+		return "", errors.New("belum ada jadwal pengumuman untuk diekspor")
+	}
+	audios, err := s.store.ListAudio()
+	if err != nil {
+		return "", err
+	}
+	audioNames := make(map[string]string, len(audios))
+	for _, a := range audios {
+		audioNames[a.ID] = a.Name
+	}
+
+	items := make([]domain.ScheduleExportItem, 0, len(schedules))
+	for _, sch := range schedules {
+		times := sch.EffectiveTimes()
+		primary := sch.TimeOfDay
+		if len(times) > 0 {
+			primary = times[0]
+		}
+		items = append(items, domain.ScheduleExportItem{
+			Title:       sch.Title,
+			Description: sch.Description,
+			AudioName:   audioNames[sch.AudioID],
+			TimeOfDay:   primary,
+			TimesOfDay:  times,
+			Days:        sch.Days,
+			Volume:      sch.Volume,
+		})
+	}
+
+	bundle := domain.ScheduleExportBundle{
+		Version:    1,
+		ExportedAt: time.Now(),
+		Schedules:  items,
+	}
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("gagal mengekspor konfigurasi jadwal: %w", err)
+	}
+	return string(data), nil
+}
+
+// ExportSchedulesToDialog opens a native save-file dialog on desktop and writes the JSON bundle.
+func (s *Service) ExportSchedulesToDialog() (string, error) {
+	if !s.capabilities.SupportsNativeFilePicker || s.saveScheduleFile == nil {
+		return "", errors.New("dialog simpan berkas native tidak tersedia pada platform ini")
+	}
+	payload, err := s.ExportSchedulesJSON()
+	if err != nil {
+		return "", err
+	}
+	targetPath, err := s.saveScheduleFile()
+	if err != nil {
+		return "", err
+	}
+	if targetPath == "" {
+		return "", nil
+	}
+	if err := os.WriteFile(targetPath, []byte(payload), 0o644); err != nil {
+		return "", fmt.Errorf("gagal menyimpan berkas ekspor jadwal: %w", err)
+	}
+	s.logger.Info("jadwal", "Konfigurasi jadwal diekspor ke "+targetPath)
+	return targetPath, nil
+}
+
+// ImportSchedulesJSON imports schedules from a portable JSON bundle or array.
+// All imported schedules are created disabled with no audio assigned so the user
+// must choose an audio file before activating each schedule.
+func (s *Service) ImportSchedulesJSON(rawJSON string) ([]domain.Schedule, error) {
+	trimmed := strings.TrimSpace(rawJSON)
+	if trimmed == "" {
+		return nil, errors.New("berkas konfigurasi jadwal kosong")
+	}
+
+	var entries []domain.ScheduleExportItem
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
+			return nil, fmt.Errorf("format JSON jadwal tidak valid: %w", err)
+		}
+	} else {
+		var bundle domain.ScheduleExportBundle
+		if err := json.Unmarshal([]byte(trimmed), &bundle); err != nil {
+			return nil, fmt.Errorf("format JSON konfigurasi jadwal tidak valid: %w", err)
+		}
+		entries = bundle.Schedules
+	}
+	if len(entries) == 0 {
+		return nil, errors.New("tidak ada jadwal di dalam berkas impor")
+	}
+
+	cfg, err := s.store.LoadConfig()
+	defaultVol := 85
+	if err == nil && cfg.DefaultVolume >= 0 && cfg.DefaultVolume <= 100 {
+		defaultVol = cfg.DefaultVolume
+	}
+
+	candidates := make([]domain.Schedule, 0, len(entries))
+	for idx, item := range entries {
+		vol := item.Volume
+		if vol < 0 || vol > 100 {
+			vol = defaultVol
+		}
+		times, err := domain.NormalizeScheduleTimes(item.TimeOfDay, item.TimesOfDay)
+		if err != nil {
+			return nil, fmt.Errorf("jadwal ke-%d tidak valid: %w", idx+1, err)
+		}
+		candidate := domain.Schedule{
+			Title:       item.Title,
+			Description: item.Description,
+			AudioID:     "",
+			TimeOfDay:   times[0],
+			TimesOfDay:  times,
+			Days:        item.Days,
+			Enabled:     false,
+			Volume:      vol,
+		}
+		if err := domain.ValidateSchedule(candidate); err != nil {
+			return nil, fmt.Errorf("jadwal ke-%d tidak valid: %w", idx+1, err)
+		}
+		candidates = append(candidates, candidate)
+	}
+
+	imported := make([]domain.Schedule, 0, len(candidates))
+	for _, candidate := range candidates {
+		saved, err := s.store.SaveSchedule(candidate)
+		if err != nil {
+			return imported, err
+		}
+		imported = append(imported, saved)
+	}
+
+	s.logger.Info("jadwal", fmt.Sprintf("%d jadwal diimpor (nonaktif — pilih audio untuk mengaktifkan)", len(imported)))
+	s.notifyChanged()
+	return imported, nil
+}
+
+// PickAndImportSchedules opens a native open-file dialog on desktop and imports schedules from JSON.
+func (s *Service) PickAndImportSchedules() ([]domain.Schedule, error) {
+	if !s.capabilities.SupportsNativeFilePicker || s.pickScheduleFile == nil {
+		return nil, errors.New("pemilih berkas native tidak tersedia pada platform ini")
+	}
+	path, err := s.pickScheduleFile()
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("gagal membaca berkas konfigurasi jadwal: %w", err)
+	}
+	return s.ImportSchedulesJSON(string(raw))
 }
 
 // DeleteSchedule removes a schedule by ID.
@@ -408,7 +597,7 @@ func (s *Service) ListLogs() []domain.LogEntry {
 }
 
 func (s *Service) handleScheduledTrigger(sch domain.Schedule) error {
-	s.logger.Info("scheduler", fmt.Sprintf("Memutar pengumuman terjadwal: %s (%s)", sch.Title, sch.TimeOfDay))
+	s.logger.Info("scheduler", fmt.Sprintf("Memutar pengumuman terjadwal: %s (%s)", sch.Title, time.Now().Format("15:04")))
 	return s.playAsset(sch.AudioID, sch.ID, sch.Volume)
 }
 

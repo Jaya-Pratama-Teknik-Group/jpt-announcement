@@ -107,3 +107,52 @@ func TestFindNextAnnouncement(t *testing.T) {
 		t.Fatalf("expected 14400 remaining seconds, got %d", next.RemainingSec)
 	}
 }
+
+func TestEvaluateAndNextOccurrenceMultipleTimesPerSchedule(t *testing.T) {
+	loc := time.FixedZone("WIB", 7*3600)
+	provider := &memoryProvider{
+		schedules: []domain.Schedule{
+			{
+				ID:         "multi",
+				Title:      "Pengumuman Shift",
+				AudioID:    "a1",
+				TimeOfDay:  "07:30",
+				TimesOfDay: []string{"07:30", "12:00", "16:30"},
+				Enabled:    true,
+				Volume:     85,
+			},
+		},
+	}
+
+	var triggered []string
+	sched := New(provider, logging.New(""), func(s domain.Schedule) error {
+		triggered = append(triggered, s.ID)
+		return nil
+	})
+
+	// 07:30 triggers once
+	tMorning := time.Date(2026, 11, 17, 7, 30, 0, 0, loc)
+	sched.Evaluate(tMorning)
+	sched.Evaluate(tMorning.Add(15 * time.Second))
+	if len(triggered) != 1 {
+		t.Fatalf("expected 1 trigger at 07:30, got %d", len(triggered))
+	}
+
+	// Next occurrence from 08:00 should be 12:00 same day
+	next, ok := NextOccurrence(provider.schedules[0], time.Date(2026, 11, 17, 8, 0, 0, 0, loc))
+	if !ok || next.Hour() != 12 || next.Minute() != 0 {
+		t.Fatalf("expected next occurrence at 12:00, got %v (ok=%v)", next, ok)
+	}
+
+	// 12:00 triggers second time for the same schedule
+	sched.Evaluate(time.Date(2026, 11, 17, 12, 0, 10, 0, loc))
+	if len(triggered) != 2 {
+		t.Fatalf("expected 2 triggers after 12:00, got %d", len(triggered))
+	}
+
+	// 16:30 triggers third time for the same schedule
+	sched.Evaluate(time.Date(2026, 11, 17, 16, 30, 5, 0, loc))
+	if len(triggered) != 3 {
+		t.Fatalf("expected 3 triggers after 16:30, got %d", len(triggered))
+	}
+}

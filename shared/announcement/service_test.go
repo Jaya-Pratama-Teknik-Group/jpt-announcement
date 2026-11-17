@@ -111,4 +111,49 @@ func TestServiceLifecycleAndAutostart(t *testing.T) {
 	if state.ActiveScheduleCount != 1 || state.TotalAudioCount != 1 {
 		t.Fatalf("unexpected dashboard state: %+v", state)
 	}
+
+	// Export schedules and import them back into a fresh service
+	exported, err := svc.ExportSchedulesJSON()
+	if err != nil {
+		t.Fatalf("ExportSchedulesJSON failed: %v", err)
+	}
+
+	store2, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore(2) failed: %v", err)
+	}
+	svc2 := NewService(Options{
+		Store:  store2,
+		Logger: logging.New(""),
+	})
+	imported, err := svc2.ImportSchedulesJSON(exported)
+	if err != nil {
+		t.Fatalf("ImportSchedulesJSON failed: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected 1 imported schedule, got %d", len(imported))
+	}
+	if imported[0].Enabled || imported[0].AudioID != "" {
+		t.Fatalf("imported schedule must be disabled with empty AudioID, got %+v", imported[0])
+	}
+
+	// Enabling imported schedule without selecting audio must fail
+	if _, err := svc2.ToggleSchedule(imported[0].ID, true); err == nil {
+		t.Fatal("expected ToggleSchedule(true) to fail when AudioID is empty")
+	}
+
+	// After importing/selecting an audio, schedule can be assigned and enabled
+	asset2, err := svc2.ImportAudioBase64("bel2.wav", "Bel Baru", b64)
+	if err != nil {
+		t.Fatalf("ImportAudioBase64(2) failed: %v", err)
+	}
+	imported[0].AudioID = asset2.ID
+	imported[0].Enabled = true
+	updated, err := svc2.SaveSchedule(imported[0])
+	if err != nil {
+		t.Fatalf("SaveSchedule after choosing audio failed: %v", err)
+	}
+	if !updated.Enabled || updated.AudioID != asset2.ID {
+		t.Fatalf("expected enabled schedule with AudioID %s, got %+v", asset2.ID, updated)
+	}
 }

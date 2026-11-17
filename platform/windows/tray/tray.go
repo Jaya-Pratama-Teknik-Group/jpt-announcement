@@ -12,6 +12,7 @@ import (
 
 // Actions defines callbacks invoked by the Windows system tray menu.
 type Actions struct {
+	Icon           []byte
 	OnPlayAudio    func()
 	OnOpenSettings func()
 	OnQuit         func()
@@ -41,8 +42,13 @@ func NewController(app *application.App, window *application.WebviewWindow, acti
 
 	systray := app.SystemTray.New()
 	systray.SetLabel("JPT Announce")
-	systray.SetIcon(icons.SystrayLight)
-	systray.SetDarkModeIcon(icons.SystrayDark)
+	if len(actions.Icon) > 0 {
+		systray.SetIcon(actions.Icon)
+		systray.SetDarkModeIcon(actions.Icon)
+	} else {
+		systray.SetIcon(icons.SystrayLight)
+		systray.SetDarkModeIcon(icons.SystrayDark)
+	}
 
 	menu := app.NewMenu()
 

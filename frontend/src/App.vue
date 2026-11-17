@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import logoImg from "../logo.jpg";
+import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
 import HugeIcon from "./components/HugeIcon.vue";
 import ScheduleModal from "./components/ScheduleModal.vue";
 import { api } from "./api/bridge";
@@ -33,7 +34,25 @@ const infoMsg = ref("");
 const busy = ref(false);
 const modalOpen = ref(false);
 const editingSchedule = ref<Schedule | null>(null);
+const deleteDialog = ref<{
+  open: boolean;
+  kind: "schedule" | "audio";
+  id: string;
+  title: string;
+  itemName: string;
+  itemDetail: string;
+  description: string;
+}>({
+  open: false,
+  kind: "schedule",
+  id: "",
+  title: "",
+  itemName: "",
+  itemDetail: "",
+  description: ""
+});
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const scheduleImportInputRef = ref<HTMLInputElement | null>(null);
 const countdownTick = ref(Date.now());
 
 let unsubState: (() => void) | null = null;
@@ -54,6 +73,14 @@ const audioNameMap = computed(() => {
   }
   return map;
 });
+
+function hasValidAudio(item: Schedule): boolean {
+  return Boolean(item.audioId && audioNameMap.value.has(item.audioId));
+}
+
+const schedulesWithoutAudioCount = computed(() =>
+  schedules.value.filter((item) => !hasValidAudio(item)).length
+);
 
 const liveCountdownText = computed(() => {
   const next = dashboard.value?.nextAnnouncement;
@@ -104,6 +131,11 @@ function formatDays(days: number[]): string {
     .join(", ");
 }
 
+function formatTimes(item: Schedule): string[] {
+  if (item.timesOfDay && item.timesOfDay.length > 0) return item.timesOfDay;
+  return item.timeOfDay ? [item.timeOfDay] : [];
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -115,7 +147,8 @@ function formatTime(iso?: string): string {
   return new Date(iso).toLocaleTimeString("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit"
+    second: "2-digit",
+    hour12: false
   });
 }
 
@@ -152,14 +185,83 @@ async function handleToggleSchedule(item: Schedule) {
   }
 }
 
-async function handleDeleteSchedule(item: Schedule) {
-  if (!confirm(`Hapus jadwal "${item.title}"?`)) return;
+function handleDeleteSchedule(item: Schedule) {
+  deleteDialog.value = {
+    open: true,
+    kind: "schedule",
+    id: item.id,
+    title: "Hapus Jadwal Pengumuman?",
+    itemName: item.title,
+    itemDetail: `${formatTimes(item).join(", ")} • ${formatDays(item.days)}`,
+    description: "Jadwal ini akan dihapus permanen dari daftar pengumuman otomatis."
+  };
+}
+
+async function handleExportSchedules() {
+  busy.value = true;
   try {
-    await api.deleteSchedule(item.id);
-    showInfo(`Jadwal "${item.title}" dihapus.`);
+    if (dashboard.value?.platform.supportsNativeFilePicker) {
+      const savedPath = await api.exportSchedulesToDialog();
+      if (savedPath) {
+        showInfo(`Konfigurasi jadwal berhasil diekspor ke ${savedPath}.`);
+      }
+      return;
+    }
+    const rawJSON = await api.exportSchedulesJSON();
+    const blob = new Blob([rawJSON], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jpt-announce-jadwal-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showInfo("Konfigurasi jadwal berhasil diekspor.");
+  } catch (err) {
+    showError(err);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function handleImportSchedules() {
+  if (dashboard.value?.platform.supportsNativeFilePicker) {
+    busy.value = true;
+    try {
+      const imported = await api.pickAndImportSchedules();
+      if (imported && imported.length > 0) {
+        showInfo(
+          `${imported.length} jadwal berhasil diimpor (status Nonaktif). Pilih audio untuk setiap jadwal sebelum mengaktifkannya.`
+        );
+        await refreshAll();
+      }
+    } catch (err) {
+      showError(err);
+    } finally {
+      busy.value = false;
+    }
+    return;
+  }
+  scheduleImportInputRef.value?.click();
+}
+
+async function handleScheduleFileSelected(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+
+  busy.value = true;
+  try {
+    const rawJSON = await file.text();
+    const imported = await api.importSchedulesJSON(rawJSON);
+    showInfo(
+      `${imported.length} jadwal berhasil diimpor (status Nonaktif). Pilih audio untuk setiap jadwal sebelum mengaktifkannya.`
+    );
     await refreshAll();
   } catch (err) {
     showError(err);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -208,20 +310,53 @@ async function handleWebFileSelected(ev: Event) {
   }
 }
 
-async function handleDeleteAudio(asset: AudioAsset) {
-  if (!confirm(`Hapus berkas audio "${asset.name}"?`)) return;
+function handleDeleteAudio(asset: AudioAsset) {
+  deleteDialog.value = {
+    open: true,
+    kind: "audio",
+    id: asset.id,
+    title: "Hapus Berkas Audio?",
+    itemName: asset.name,
+    itemDetail: `${asset.fileName} • ${formatSize(asset.sizeBytes)}`,
+    description:
+      "Berkas audio akan dihapus dari penyimpanan aplikasi dan tidak dapat dipulihkan."
+  };
+}
+
+async function confirmDeleteTarget() {
+  if (!deleteDialog.value.open || !deleteDialog.value.id) return;
+  const { kind, id, itemName } = deleteDialog.value;
+  busy.value = true;
   try {
-    await api.deleteAudioFile(asset.id);
-    showInfo(`Audio "${asset.name}" dihapus.`);
+    if (kind === "schedule") {
+      await api.deleteSchedule(id);
+      showInfo(`Jadwal "${itemName}" dihapus.`);
+    } else {
+      await api.deleteAudioFile(id);
+      showInfo(`Audio "${itemName}" dihapus.`);
+    }
+    deleteDialog.value.open = false;
     await refreshAll();
   } catch (err) {
+    deleteDialog.value.open = false;
     showError(err);
+  } finally {
+    busy.value = false;
   }
 }
 
 async function handlePlayAudio(audioId: string) {
   try {
     await api.playAudio(audioId, settings.value.defaultVolume);
+    await refreshAll();
+  } catch (err) {
+    showError(err);
+  }
+}
+
+async function handlePreviewScheduleAudio(audioId: string, volume: number) {
+  try {
+    await api.playAudio(audioId, volume);
     await refreshAll();
   } catch (err) {
     showError(err);
@@ -474,7 +609,7 @@ onUnmounted(() => {
           <template v-if="dashboard?.nextAnnouncement">
             <h3 style="margin: 0 0 6px">{{ dashboard.nextAnnouncement.title }}</h3>
             <p class="page-subtitle" style="margin-bottom: 12px">
-              Jam {{ new Date(dashboard.nextAnnouncement.scheduledAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) }}
+              Jam {{ new Date(dashboard.nextAnnouncement.scheduledAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }) }}
               &bull; Audio: {{ dashboard.nextAnnouncement.audioName || "-" }}
               &bull; Hitung mundur: <strong>{{ liveCountdownText }}</strong>
             </p>
@@ -517,19 +652,48 @@ onUnmounted(() => {
             <h1 class="page-title">Jadwal Pengumuman</h1>
             <p class="page-subtitle">Atur waktu dan hari pemutaran audio otomatis</p>
           </div>
-          <button
-            class="btn btn-primary"
-            type="button"
-            :disabled="audios.length === 0"
-            @click="openCreateSchedule"
-          >
-            <HugeIcon name="add-01" :size="17" />
-            <span>Tambah Jadwal</span>
-          </button>
+          <div class="btn-row">
+            <button
+              class="btn"
+              type="button"
+              :disabled="busy || schedules.length === 0"
+              @click="handleExportSchedules"
+            >
+              <HugeIcon name="file-export" :size="17" />
+              <span>Ekspor</span>
+            </button>
+            <button class="btn" type="button" :disabled="busy" @click="handleImportSchedules">
+              <HugeIcon name="file-import" :size="17" />
+              <span>Impor</span>
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              :disabled="audios.length === 0"
+              @click="openCreateSchedule"
+            >
+              <HugeIcon name="add-01" :size="17" />
+              <span>Tambah Jadwal</span>
+            </button>
+          </div>
+          <input
+            ref="scheduleImportInputRef"
+            type="file"
+            accept=".json,application/json"
+            style="display: none"
+            @change="handleScheduleFileSelected"
+          />
         </div>
 
         <div v-if="audios.length === 0" class="notice notice-warning">
-          Tambahkan minimal satu berkas audio di menu <strong>Audio</strong> sebelum membuat jadwal.
+          Tambahkan minimal satu berkas audio di menu <strong>Audio</strong> sebelum membuat atau
+          mengaktifkan jadwal.
+        </div>
+
+        <div v-if="schedulesWithoutAudioCount > 0" class="notice notice-warning">
+          Ada <strong>{{ schedulesWithoutAudioCount }} jadwal</strong> yang belum memiliki berkas
+          audio (hasil impor). Klik <strong>Pilih Audio</strong> pada jadwal tersebut agar dapat
+          diaktifkan.
         </div>
 
         <div v-if="schedules.length === 0" class="card">
@@ -556,9 +720,19 @@ onUnmounted(() => {
                   <strong>{{ item.title }}</strong>
                   <div v-if="item.description" class="page-subtitle">{{ item.description }}</div>
                 </td>
-                <td><strong>{{ item.timeOfDay }}</strong></td>
+                <td>
+                  <div class="time-pills">
+                    <span v-for="t in formatTimes(item)" :key="t" class="time-pill">{{ t }}</span>
+                  </div>
+                </td>
                 <td>{{ formatDays(item.days) }}</td>
-                <td>{{ audioNameMap.get(item.audioId) || "Audio tidak ditemukan" }}</td>
+                <td>
+                  <span v-if="hasValidAudio(item)">{{ audioNameMap.get(item.audioId) }}</span>
+                  <span v-else class="badge badge-warning">
+                    <HugeIcon name="alert-02" :size="14" />
+                    <span>Perlu pilih audio</span>
+                  </span>
+                </td>
                 <td>{{ item.volume }}%</td>
                 <td>
                   <span class="badge" :class="item.enabled ? 'badge-success' : 'badge-muted'">
@@ -570,6 +744,7 @@ onUnmounted(() => {
                     <button
                       class="btn btn-sm"
                       type="button"
+                      :disabled="!hasValidAudio(item)"
                       @click="handlePlayScheduleNow(item.id)"
                     >
                       <HugeIcon name="play" :size="15" />
@@ -578,14 +753,25 @@ onUnmounted(() => {
                     <button
                       class="btn btn-sm"
                       type="button"
+                      :disabled="!item.enabled && !hasValidAudio(item)"
+                      :title="
+                        !item.enabled && !hasValidAudio(item)
+                          ? 'Pilih audio terlebih dahulu sebelum mengaktifkan'
+                          : ''
+                      "
                       @click="handleToggleSchedule(item)"
                     >
                       <HugeIcon name="power" :size="15" />
                       <span>{{ item.enabled ? "Matikan" : "Aktifkan" }}</span>
                     </button>
-                    <button class="btn btn-sm" type="button" @click="openEditSchedule(item)">
+                    <button
+                      class="btn btn-sm"
+                      :class="!hasValidAudio(item) ? 'btn-primary' : ''"
+                      type="button"
+                      @click="openEditSchedule(item)"
+                    >
                       <HugeIcon name="edit-02" :size="15" />
-                      <span>Ubah</span>
+                      <span>{{ hasValidAudio(item) ? "Ubah" : "Pilih Audio" }}</span>
                     </button>
                     <button
                       class="btn btn-sm btn-danger"
@@ -608,29 +794,48 @@ onUnmounted(() => {
             <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px">
               <div>
                 <h3 style="margin: 0">{{ item.title }}</h3>
-                <p class="page-subtitle">
-                  <strong>{{ item.timeOfDay }}</strong> &bull; {{ formatDays(item.days) }}
-                </p>
+                <div class="time-pills" style="margin: 6px 0 4px">
+                  <span v-for="t in formatTimes(item)" :key="t" class="time-pill">{{ t }}</span>
+                </div>
+                <p class="page-subtitle">{{ formatDays(item.days) }}</p>
               </div>
               <span class="badge" :class="item.enabled ? 'badge-success' : 'badge-muted'">
                 {{ item.enabled ? "Aktif" : "Nonaktif" }}
               </span>
             </div>
             <p class="page-subtitle" style="margin: 8px 0 12px">
-              Audio: {{ audioNameMap.get(item.audioId) || "-" }} &bull; Volume {{ item.volume }}%
+              Audio:
+              <template v-if="hasValidAudio(item)">{{ audioNameMap.get(item.audioId) }}</template>
+              <span v-else class="badge badge-warning">Perlu pilih audio</span>
+              &bull; Volume {{ item.volume }}%
             </p>
             <div class="btn-row">
-              <button class="btn btn-sm btn-primary" type="button" @click="handlePlayScheduleNow(item.id)">
+              <button
+                class="btn btn-sm btn-primary"
+                type="button"
+                :disabled="!hasValidAudio(item)"
+                @click="handlePlayScheduleNow(item.id)"
+              >
                 <HugeIcon name="play" :size="15" />
                 <span>Putar</span>
               </button>
-              <button class="btn btn-sm" type="button" @click="handleToggleSchedule(item)">
+              <button
+                class="btn btn-sm"
+                type="button"
+                :disabled="!item.enabled && !hasValidAudio(item)"
+                @click="handleToggleSchedule(item)"
+              >
                 <HugeIcon name="power" :size="15" />
                 <span>{{ item.enabled ? "Nonaktifkan" : "Aktifkan" }}</span>
               </button>
-              <button class="btn btn-sm" type="button" @click="openEditSchedule(item)">
+              <button
+                class="btn btn-sm"
+                :class="!hasValidAudio(item) ? 'btn-primary' : ''"
+                type="button"
+                @click="openEditSchedule(item)"
+              >
                 <HugeIcon name="edit-02" :size="15" />
-                <span>Ubah</span>
+                <span>{{ hasValidAudio(item) ? "Ubah" : "Pilih Audio" }}</span>
               </button>
               <button class="btn btn-sm btn-danger" type="button" @click="handleDeleteSchedule(item)">
                 <HugeIcon name="delete-02" :size="15" />
@@ -679,25 +884,38 @@ onUnmounted(() => {
           </p>
         </div>
 
-        <div v-else class="grid-cards">
-          <div v-for="asset in audios" :key="asset.id" class="card">
-            <div style="display: flex; justify-content: space-between; gap: 8px; align-items: start">
-              <div style="display: flex; gap: 10px; align-items: start">
-                <span class="card-icon-chip chip-mint">
-                  <HugeIcon name="file-audio" :size="17" />
-                </span>
-                <div>
-                  <h3 style="margin: 0">{{ asset.name }}</h3>
-                  <p class="page-subtitle">{{ asset.fileName }}</p>
+        <div v-else class="card audio-list-card">
+          <div v-for="asset in audios" :key="asset.id" class="audio-row">
+            <div class="audio-row-main">
+              <span class="card-icon-chip chip-mint">
+                <HugeIcon name="file-audio" :size="18" />
+              </span>
+              <div class="audio-row-info">
+                <div class="audio-row-title-line">
+                  <strong class="audio-row-title">{{ asset.name }}</strong>
+                  <span class="badge badge-primary">.{{ asset.format }}</span>
                 </div>
+                <p class="page-subtitle audio-row-meta">
+                  {{ asset.fileName }} &bull; {{ formatSize(asset.sizeBytes) }}
+                </p>
               </div>
-              <span class="badge badge-primary">.{{ asset.format }}</span>
             </div>
-            <p class="page-subtitle" style="margin: 8px 0 14px">
-              Ukuran: {{ formatSize(asset.sizeBytes) }}
-            </p>
-            <div class="btn-row">
-              <button class="btn btn-sm btn-primary" type="button" @click="handlePlayAudio(asset.id)">
+            <div class="btn-row audio-row-actions">
+              <button
+                v-if="dashboard?.playback.isPlaying && dashboard.playback.audioId === asset.id"
+                class="btn btn-sm btn-danger"
+                type="button"
+                @click="handleStopAudio"
+              >
+                <HugeIcon name="stop" :size="15" />
+                <span>Hentikan</span>
+              </button>
+              <button
+                v-else
+                class="btn btn-sm btn-primary"
+                type="button"
+                @click="handlePlayAudio(asset.id)"
+              >
                 <HugeIcon name="play" :size="15" />
                 <span>Uji Putar</span>
               </button>
@@ -828,8 +1046,22 @@ onUnmounted(() => {
       :initial="editingSchedule"
       :audios="audios"
       :default-volume="settings.defaultVolume"
+      :playback="dashboard?.playback"
       @close="modalOpen = false"
       @save="handleSaveSchedule"
+      @preview-audio="handlePreviewScheduleAudio"
+      @stop-audio="handleStopAudio"
+    />
+
+    <ConfirmDeleteModal
+      :open="deleteDialog.open"
+      :title="deleteDialog.title"
+      :item-name="deleteDialog.itemName"
+      :item-detail="deleteDialog.itemDetail"
+      :description="deleteDialog.description"
+      :busy="busy"
+      @close="deleteDialog.open = false"
+      @confirm="confirmDeleteTarget"
     />
   </div>
 </template>

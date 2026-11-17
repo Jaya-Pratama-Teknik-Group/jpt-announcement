@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,17 +119,24 @@ func (s *Scheduler) Evaluate(now time.Time) {
 
 	minuteKey := now.Truncate(time.Minute)
 	for _, sch := range schedules {
-		if !sch.Enabled {
+		if !sch.Enabled || strings.TrimSpace(sch.AudioID) == "" {
 			continue
 		}
 		if !sch.MatchesWeekday(now.Weekday()) {
 			continue
 		}
-		hour, minute, err := domain.ParseTimeOfDay(sch.TimeOfDay)
-		if err != nil {
-			continue
+		matched := false
+		for _, tStr := range sch.EffectiveTimes() {
+			hour, minute, err := domain.ParseTimeOfDay(tStr)
+			if err != nil {
+				continue
+			}
+			if now.Hour() == hour && now.Minute() == minute {
+				matched = true
+				break
+			}
 		}
-		if now.Hour() != hour || now.Minute() != minute {
+		if !matched {
 			continue
 		}
 		if sch.LastTriggeredAt != nil && sch.LastTriggeredAt.In(now.Location()).Truncate(time.Minute).Equal(minuteKey) {
@@ -147,11 +155,11 @@ func (s *Scheduler) Evaluate(now time.Time) {
 
 // NextOccurrence computes the next firing timestamp for a single enabled schedule from `from`.
 func NextOccurrence(sch domain.Schedule, from time.Time) (time.Time, bool) {
-	if !sch.Enabled {
+	if !sch.Enabled || strings.TrimSpace(sch.AudioID) == "" {
 		return time.Time{}, false
 	}
-	hour, minute, err := domain.ParseTimeOfDay(sch.TimeOfDay)
-	if err != nil {
+	times := sch.EffectiveTimes()
+	if len(times) == 0 {
 		return time.Time{}, false
 	}
 
@@ -161,14 +169,20 @@ func NextOccurrence(sch domain.Schedule, from time.Time) (time.Time, bool) {
 		if !sch.MatchesWeekday(day.Weekday()) {
 			continue
 		}
-		candidate := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, loc)
-		if candidate.Before(from) {
-			continue
+		for _, tStr := range times {
+			hour, minute, err := domain.ParseTimeOfDay(tStr)
+			if err != nil {
+				continue
+			}
+			candidate := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, loc)
+			if candidate.Before(from) {
+				continue
+			}
+			if sch.LastTriggeredAt != nil && sch.LastTriggeredAt.In(loc).Truncate(time.Minute).Equal(candidate.Truncate(time.Minute)) {
+				continue
+			}
+			return candidate, true
 		}
-		if sch.LastTriggeredAt != nil && sch.LastTriggeredAt.In(loc).Truncate(time.Minute).Equal(candidate.Truncate(time.Minute)) {
-			continue
-		}
-		return candidate, true
 	}
 	return time.Time{}, false
 }

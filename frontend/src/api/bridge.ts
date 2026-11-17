@@ -30,6 +30,18 @@ export const api = {
   deleteSchedule(id: string): Promise<void> {
     return invoke<void>("DeleteSchedule", id);
   },
+  exportSchedulesJSON(): Promise<string> {
+    return invoke<string>("ExportSchedulesJSON");
+  },
+  exportSchedulesToDialog(): Promise<string> {
+    return invoke<string>("ExportSchedulesToDialog");
+  },
+  importSchedulesJSON(rawJSON: string): Promise<Schedule[]> {
+    return invoke<Schedule[]>("ImportSchedulesJSON", rawJSON);
+  },
+  pickAndImportSchedules(): Promise<Schedule[] | null> {
+    return invoke<Schedule[] | null>("PickAndImportSchedules");
+  },
   listAudioFiles(): Promise<AudioAsset[]> {
     return invoke<AudioAsset[]>("ListAudioFiles");
   },

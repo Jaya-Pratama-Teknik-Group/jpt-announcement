@@ -97,6 +97,12 @@ func (s *Store) ListSchedules() ([]domain.Schedule, error) {
 
 // SaveSchedule inserts or updates a schedule.
 func (s *Store) SaveSchedule(item domain.Schedule) (domain.Schedule, error) {
+	times, err := domain.NormalizeScheduleTimes(item.TimeOfDay, item.TimesOfDay)
+	if err != nil {
+		return domain.Schedule{}, err
+	}
+	item.TimesOfDay = times
+	item.TimeOfDay = times[0]
 	if err := domain.ValidateSchedule(item); err != nil {
 		return domain.Schedule{}, err
 	}
@@ -345,6 +351,12 @@ func (s *Store) loadSchedulesLocked() ([]domain.Schedule, error) {
 	var items []domain.Schedule
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, fmt.Errorf("berkas jadwal rusak: %w", err)
+	}
+	for i := range items {
+		if times, err := domain.NormalizeScheduleTimes(items[i].TimeOfDay, items[i].TimesOfDay); err == nil {
+			items[i].TimesOfDay = times
+			items[i].TimeOfDay = times[0]
+		}
 	}
 	return items, nil
 }
