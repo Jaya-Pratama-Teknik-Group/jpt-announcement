@@ -81,8 +81,19 @@ func Capabilities() domain.PlatformCapabilities {
 		SupportsSystemTray:          false,
 		SupportsBackgroundScheduler: true,
 		SupportsNativeFilePicker:    true,
+		SupportsAudioDucking:        false,
 		SupportedAudioFormats:       []string{".mp3", ".mpeg", ".mpga", ".wav"},
 	}
+}
+
+type noopAudioDucker struct{}
+
+func (noopAudioDucker) Duck(int) error { return nil }
+func (noopAudioDucker) Restore() error { return nil }
+
+// SetupAudioDucker returns a safe no-op audio ducker on non-Windows desktop hosts.
+func SetupAudioDucker() platform.AudioDucker {
+	return noopAudioDucker{}
 }
 
 // SetupAdapters initializes fallback desktop adapters.

@@ -83,6 +83,7 @@ func main() {
 
 	// Attach adapters into the already-registered service instance before starting scheduler.
 	svc = attachRuntimeAdapters(svc, store, logger, caps, audioPlayer, startupMgr, trayCtrl, app)
+	svc.SetAudioDucker(platformrt.SetupAudioDucker())
 	svc.SetNotifier(platformrt.SetupNotifier(platformrt.NotifyHooks{
 		OnPause: func() {
 			if err := svc.PauseAudio(); err != nil {

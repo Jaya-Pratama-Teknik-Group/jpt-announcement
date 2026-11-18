@@ -26,6 +26,7 @@ type Service struct {
 	store            *config.Store
 	logger           *logging.Logger
 	audio            platform.AudioPlayer
+	ducker           platform.AudioDucker
 	startup          platform.StartupManager
 	tray             platform.TrayController
 	notifier         platform.Notifier
@@ -37,6 +38,7 @@ type Service struct {
 	scheduler        *scheduler.Scheduler
 
 	playMu   sync.RWMutex
+	playSeq  uint64
 	playback domain.PlaybackState
 }
 
@@ -45,6 +47,7 @@ type Options struct {
 	Store        *config.Store
 	Logger       *logging.Logger
 	Audio        platform.AudioPlayer
+	AudioDucker  platform.AudioDucker
 	Startup      platform.StartupManager
 	Tray         platform.TrayController
 	Notifier     platform.Notifier
@@ -59,6 +62,7 @@ func NewService(opts Options) *Service {
 		store:        opts.Store,
 		logger:       opts.Logger,
 		audio:        opts.Audio,
+		ducker:       opts.AudioDucker,
 		startup:      opts.Startup,
 		tray:         opts.Tray,
 		notifier:     opts.Notifier,
@@ -87,6 +91,11 @@ func (s *Service) SetTray(tray platform.TrayController) {
 // SetNotifier attaches the platform notification controller after app creation.
 func (s *Service) SetNotifier(notifier platform.Notifier) {
 	s.notifier = notifier
+}
+
+// SetAudioDucker attaches the platform audio ducker after app creation.
+func (s *Service) SetAudioDucker(ducker platform.AudioDucker) {
+	s.ducker = ducker
 }
 
 // SetFilePicker sets the native file dialog callback.
@@ -133,6 +142,7 @@ func (s *Service) Shutdown() {
 	if s.audio != nil {
 		_ = s.audio.Stop()
 	}
+	s.restoreDucking()
 	if s.notifier != nil {
 		s.notifier.DismissPlayback()
 	}
@@ -532,6 +542,7 @@ func (s *Service) PauseAudio() error {
 	}
 	pb := s.playback
 	s.playMu.Unlock()
+	s.restoreDucking()
 	if pb.IsPlaying && pb.ScheduleID != "" && s.notifier != nil {
 		s.notifier.NotifyPlayback(pb.ScheduleTitle, pb.AudioName, true)
 	}
@@ -545,7 +556,20 @@ func (s *Service) ResumeAudio() error {
 	if s.audio == nil {
 		return nil
 	}
+	s.playMu.RLock()
+	shouldDuck := s.playback.IsPlaying && s.playback.IsPaused
+	s.playMu.RUnlock()
+	if shouldDuck {
+		cfg, err := s.store.LoadConfig()
+		if err != nil {
+			cfg = domain.DefaultAppConfig()
+		}
+		s.applyDucking(cfg)
+	}
 	if err := s.audio.Resume(); err != nil {
+		if shouldDuck {
+			s.restoreDucking()
+		}
 		return err
 	}
 	s.playMu.Lock()
@@ -582,10 +606,12 @@ func (s *Service) StopAudio() error {
 	if s.audio == nil {
 		return nil
 	}
-	err := s.audio.Stop()
 	s.playMu.Lock()
+	s.playSeq++
 	s.playback = domain.PlaybackState{}
 	s.playMu.Unlock()
+	err := s.audio.Stop()
+	s.restoreDucking()
 	if s.notifier != nil {
 		s.notifier.DismissPlayback()
 	}
@@ -682,17 +708,18 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 	if err != nil {
 		return err
 	}
+	cfg, cfgErr := s.store.LoadConfig()
+	if cfgErr != nil {
+		cfg = domain.DefaultAppConfig()
+	}
 	if volume < 0 || volume > 100 {
-		cfg, cfgErr := s.store.LoadConfig()
-		if cfgErr == nil {
-			volume = cfg.DefaultVolume
-		} else {
-			volume = 85
-		}
+		volume = cfg.DefaultVolume
 	}
 
 	now := time.Now()
 	s.playMu.Lock()
+	s.playSeq++
+	token := s.playSeq
 	s.playback = domain.PlaybackState{
 		IsPlaying:     true,
 		IsPaused:      false,
@@ -705,6 +732,8 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 	s.playMu.Unlock()
 	s.notifyChanged()
 
+	s.applyDucking(cfg)
+
 	err = s.audio.Play(context.Background(), asset.FilePath, volume, func(playErr error) {
 		if playErr != nil {
 			s.logger.Error("audio", fmt.Sprintf("Kesalahan pemutaran %q: %v", asset.Name, playErr))
@@ -712,8 +741,15 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 			s.logger.Info("audio", fmt.Sprintf("Selesai memutar %q", asset.Name))
 		}
 		s.playMu.Lock()
-		s.playback = domain.PlaybackState{}
+		isCurrent := s.playSeq == token
+		if isCurrent {
+			s.playback = domain.PlaybackState{}
+		}
 		s.playMu.Unlock()
+		if !isCurrent {
+			return
+		}
+		s.restoreDucking()
 		if s.notifier != nil {
 			s.notifier.DismissPlayback()
 		}
@@ -721,10 +757,16 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 	})
 	if err != nil {
 		s.playMu.Lock()
-		s.playback = domain.PlaybackState{}
+		isCurrent := s.playSeq == token
+		if isCurrent {
+			s.playback = domain.PlaybackState{}
+		}
 		s.playMu.Unlock()
-		if s.notifier != nil {
-			s.notifier.DismissPlayback()
+		if isCurrent {
+			s.restoreDucking()
+			if s.notifier != nil {
+				s.notifier.DismissPlayback()
+			}
 		}
 		s.logger.Error("audio", fmt.Sprintf("Gagal memulai audio %q: %v", asset.Name, err))
 		s.notifyChanged()
@@ -736,6 +778,24 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 	}
 	s.logger.Info("audio", fmt.Sprintf("Sedang memutar %q (volume %d%%)", asset.Name, volume))
 	return nil
+}
+
+func (s *Service) applyDucking(cfg domain.AppConfig) {
+	if s.ducker == nil || !cfg.DuckOtherAudio {
+		return
+	}
+	if err := s.ducker.Duck(cfg.DuckVolumePercent); err != nil {
+		s.logger.Warn("audio", "Gagal mengecilkan volume aplikasi lain: "+err.Error())
+	}
+}
+
+func (s *Service) restoreDucking() {
+	if s.ducker == nil {
+		return
+	}
+	if err := s.ducker.Restore(); err != nil {
+		s.logger.Warn("audio", "Gagal mengembalikan volume aplikasi lain: "+err.Error())
+	}
 }
 
 func (s *Service) notifyChanged() {

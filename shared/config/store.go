@@ -71,6 +71,9 @@ func (s *Store) LoadConfig() (domain.AppConfig, error) {
 	if cfg.DefaultVolume < 0 || cfg.DefaultVolume > 100 {
 		cfg.DefaultVolume = 85
 	}
+	if cfg.DuckVolumePercent < 0 || cfg.DuckVolumePercent > 100 {
+		cfg.DuckVolumePercent = 25
+	}
 	return cfg, nil
 }
 
@@ -78,6 +81,9 @@ func (s *Store) LoadConfig() (domain.AppConfig, error) {
 func (s *Store) SaveConfig(cfg domain.AppConfig) error {
 	if cfg.DefaultVolume < 0 || cfg.DefaultVolume > 100 {
 		return errors.New("volume bawaan harus di antara 0 dan 100")
+	}
+	if cfg.DuckVolumePercent < 0 || cfg.DuckVolumePercent > 100 {
+		return errors.New("persentase volume aplikasi lain harus di antara 0 dan 100")
 	}
 	if cfg.Language == "" {
 		cfg.Language = "id"

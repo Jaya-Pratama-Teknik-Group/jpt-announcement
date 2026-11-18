@@ -16,6 +16,12 @@ type AudioPlayer interface {
 	IsPaused() bool
 }
 
+// AudioDucker temporarily lowers other active OS audio sessions while an announcement plays.
+type AudioDucker interface {
+	Duck(targetPercent int) error
+	Restore() error
+}
+
 // Notifier sends OS-level interactive notifications when scheduled audio plays.
 type Notifier interface {
 	NotifyPlayback(scheduleTitle, audioName string, paused bool)

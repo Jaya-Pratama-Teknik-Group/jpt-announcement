@@ -57,8 +57,14 @@ func Capabilities() domain.PlatformCapabilities {
 		SupportsSystemTray:          true,
 		SupportsBackgroundScheduler: true,
 		SupportsNativeFilePicker:    true,
+		SupportsAudioDucking:        true,
 		SupportedAudioFormats:       []string{".mp3", ".mpeg", ".mpga", ".wav"},
 	}
+}
+
+// SetupAudioDucker constructs the Windows WASAPI audio ducker.
+func SetupAudioDucker() platform.AudioDucker {
+	return winaudio.NewDucker()
 }
 
 // SetupAdapters initializes Windows audio, autostart, and system tray adapters.

@@ -20,19 +20,27 @@ func TestStoreConfigSchedulesAndAudio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if cfg.Language != "id" || cfg.DefaultVolume != 85 {
+	if cfg.Language != "id" || cfg.DefaultVolume != 85 || !cfg.DuckOtherAudio || cfg.DuckVolumePercent != 25 {
 		t.Fatalf("unexpected default config: %+v", cfg)
 	}
 
 	cfg.AutostartEnabled = true
 	cfg.DefaultVolume = 90
+	cfg.DuckOtherAudio = false
+	cfg.DuckVolumePercent = 30
 	if err := store.SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
 	}
 
 	reloaded, err := store.LoadConfig()
-	if err != nil || !reloaded.AutostartEnabled || reloaded.DefaultVolume != 90 {
+	if err != nil || !reloaded.AutostartEnabled || reloaded.DefaultVolume != 90 || reloaded.DuckOtherAudio || reloaded.DuckVolumePercent != 30 {
 		t.Fatalf("config did not persist properly: %+v, err=%v", reloaded, err)
+	}
+
+	badCfg := cfg
+	badCfg.DuckVolumePercent = 120
+	if err := store.SaveConfig(badCfg); err == nil {
+		t.Fatal("expected SaveConfig to reject out-of-range DuckVolumePercent")
 	}
 
 	// Audio import via bytes and file (.mp3 and .mpeg)

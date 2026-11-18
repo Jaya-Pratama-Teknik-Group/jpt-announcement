@@ -80,6 +80,96 @@ func (f *fakeStartup) Enable() error          { f.enabled = true; return nil }
 func (f *fakeStartup) Disable() error         { f.enabled = false; return nil }
 func (f *fakeStartup) IsEnabled() (bool, error) { return f.enabled, nil }
 
+type fakeDucker struct {
+	mu           sync.Mutex
+	duckCalls    []int
+	restoreCalls int
+	active       bool
+}
+
+func (f *fakeDucker) Duck(targetPercent int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.duckCalls = append(f.duckCalls, targetPercent)
+	f.active = true
+	return nil
+}
+
+func (f *fakeDucker) Restore() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restoreCalls++
+	f.active = false
+	return nil
+}
+
+type asyncAudio struct {
+	mu       sync.Mutex
+	playing  bool
+	paused   bool
+	onFinish func(error)
+}
+
+func (a *asyncAudio) Play(_ context.Context, _ string, _ int, onFinish func(error)) error {
+	a.mu.Lock()
+	a.playing = true
+	a.paused = false
+	a.onFinish = onFinish
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *asyncAudio) Pause() error {
+	a.mu.Lock()
+	if a.playing {
+		a.paused = true
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *asyncAudio) Resume() error {
+	a.mu.Lock()
+	if a.playing {
+		a.paused = false
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *asyncAudio) Stop() error {
+	a.mu.Lock()
+	a.playing = false
+	a.paused = false
+	a.onFinish = nil
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *asyncAudio) IsPlaying() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.playing
+}
+
+func (a *asyncAudio) IsPaused() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.playing && a.paused
+}
+
+func (a *asyncAudio) finish() {
+	a.mu.Lock()
+	cb := a.onFinish
+	a.playing = false
+	a.paused = false
+	a.onFinish = nil
+	a.mu.Unlock()
+	if cb != nil {
+		cb(nil)
+	}
+}
+
 func TestServiceLifecycleAndAutostart(t *testing.T) {
 	store, err := config.NewStore(t.TempDir())
 	if err != nil {
@@ -183,5 +273,79 @@ func TestServiceLifecycleAndAutostart(t *testing.T) {
 	}
 	if !updated.Enabled || updated.AudioID != asset2.ID {
 		t.Fatalf("expected enabled schedule with AudioID %s, got %+v", asset2.ID, updated)
+	}
+}
+
+func TestAudioDuckingLifecycle(t *testing.T) {
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	audio := &asyncAudio{}
+	ducker := &fakeDucker{}
+
+	svc := NewService(Options{
+		Store:       store,
+		Logger:      logging.New(""),
+		Audio:       audio,
+		AudioDucker: ducker,
+		Capabilities: domain.PlatformCapabilities{
+			Platform:             "windows",
+			IsDesktop:            true,
+			SupportsAudioDucking: true,
+		},
+	})
+	defer svc.Shutdown()
+
+	b64 := base64.StdEncoding.EncodeToString([]byte("RIFFmockwav"))
+	asset, err := svc.ImportAudioBase64("bel.wav", "Bel", b64)
+	if err != nil {
+		t.Fatalf("ImportAudioBase64 failed: %v", err)
+	}
+
+	if err := svc.PlayAudio(asset.ID, 90); err != nil {
+		t.Fatalf("PlayAudio failed: %v", err)
+	}
+	if len(ducker.duckCalls) != 1 || ducker.duckCalls[0] != 25 || !ducker.active {
+		t.Fatalf("expected duck(25) active, got calls=%v active=%v", ducker.duckCalls, ducker.active)
+	}
+
+	if err := svc.PauseAudio(); err != nil {
+		t.Fatalf("PauseAudio failed: %v", err)
+	}
+	if ducker.active || ducker.restoreCalls != 1 {
+		t.Fatalf("expected restore on pause, got active=%v restores=%d", ducker.active, ducker.restoreCalls)
+	}
+
+	if err := svc.ResumeAudio(); err != nil {
+		t.Fatalf("ResumeAudio failed: %v", err)
+	}
+	if !ducker.active || len(ducker.duckCalls) != 2 {
+		t.Fatalf("expected re-duck on resume, got active=%v calls=%v", ducker.active, ducker.duckCalls)
+	}
+
+	audio.finish()
+	if ducker.active || ducker.restoreCalls != 2 {
+		t.Fatalf("expected restore on finish, got active=%v restores=%d", ducker.active, ducker.restoreCalls)
+	}
+
+	// Disable ducking and verify PlayAudio does not duck
+	cfg, err := svc.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings failed: %v", err)
+	}
+	cfg.DuckOtherAudio = false
+	cfg.DuckVolumePercent = 15
+	if _, err := svc.UpdateSettings(cfg); err != nil {
+		t.Fatalf("UpdateSettings failed: %v", err)
+	}
+	if err := svc.PlayAudio(asset.ID, 90); err != nil {
+		t.Fatalf("PlayAudio(disabled ducking) failed: %v", err)
+	}
+	if len(ducker.duckCalls) != 2 {
+		t.Fatalf("expected no additional duck call when disabled, got %v", ducker.duckCalls)
+	}
+	if err := svc.StopAudio(); err != nil {
+		t.Fatalf("StopAudio failed: %v", err)
 	}
 }

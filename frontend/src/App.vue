@@ -26,6 +26,8 @@ const settings = ref<AppConfig>({
   startMinimized: true,
   autostartEnabled: false,
   defaultVolume: 85,
+  duckOtherAudio: true,
+  duckVolumePercent: 25,
   schedulerEnabled: true,
   language: "id"
 });
@@ -1046,6 +1048,36 @@ onUnmounted(() => {
             </label>
             <input id="cfg-vol" v-model.number="settings.defaultVolume" type="range" min="0" max="100" />
           </div>
+
+          <template v-if="dashboard?.platform.supportsAudioDucking">
+            <div class="switch-row" style="margin-top: 14px">
+              <div>
+                <strong>Kecilkan Volume Aplikasi Lain Saat Pengumuman</strong>
+                <p class="page-subtitle">
+                  Otomatis menurunkan volume musik atau aplikasi lain di Windows selama pengumuman
+                  diputar, lalu mengembalikannya setelah selesai
+                </p>
+              </div>
+              <input v-model="settings.duckOtherAudio" class="switch-input" type="checkbox" />
+            </div>
+
+            <div v-if="settings.duckOtherAudio" class="field" style="margin-top: 10px">
+              <label for="cfg-duck-vol" style="display: inline-flex; align-items: center; gap: 6px">
+                <HugeIcon name="volume-high" :size="16" />
+                <span>Sisa Volume Aplikasi Lain: {{ settings.duckVolumePercent }}%</span>
+              </label>
+              <input
+                id="cfg-duck-vol"
+                v-model.number="settings.duckVolumePercent"
+                type="range"
+                min="0"
+                max="100"
+              />
+              <p class="page-subtitle" style="margin-top: 4px">
+                Contoh: 25% menurunkan volume musik dari 80% menjadi 20% selama pengumuman berlangsung
+              </p>
+            </div>
+          </template>
 
           <div class="btn-row" style="margin-top: 16px">
             <button class="btn btn-primary" type="button" :disabled="busy" @click="handleSaveSettings">

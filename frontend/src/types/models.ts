@@ -27,6 +27,8 @@ export interface AppConfig {
   startMinimized: boolean;
   autostartEnabled: boolean;
   defaultVolume: number;
+  duckOtherAudio: boolean;
+  duckVolumePercent: number;
   schedulerEnabled: boolean;
   language: string;
 }
@@ -46,6 +48,7 @@ export interface PlatformCapabilities {
   supportsSystemTray: boolean;
   supportsBackgroundScheduler: boolean;
   supportsNativeFilePicker: boolean;
+  supportsAudioDucking: boolean;
   supportedAudioFormats: string[];
 }
 
