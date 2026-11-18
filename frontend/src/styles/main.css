@@ -1255,3 +1255,102 @@ textarea {
     transform: translateY(-12px);
   }
 }
+
+/* Alert Popup Modal (Info & Error with 10s Auto-Close) */
+.modal-backdrop-alert {
+  z-index: 70;
+}
+
+.alert-icon-info {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 6px #f1f6fd;
+}
+
+.alert-icon-error {
+  background: var(--danger-soft);
+  color: #dc2626;
+  border-color: #fecaca;
+  box-shadow: 0 0 0 6px #fff5f5;
+}
+
+.alert-message-box {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.alert-message-info {
+  background: #f5f9ff;
+  border-color: #cfe0fa;
+  color: #16375f;
+}
+
+.alert-message-error {
+  background: #fff6f6;
+  border-color: #fecaca;
+  color: #881c1c;
+}
+
+.alert-countdown-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.alert-countdown-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.alert-countdown-row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.alert-progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.alert-progress-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation-name: alert-countdown-shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.alert-progress-fill.fill-info {
+  background: var(--primary);
+}
+
+.alert-progress-fill.fill-error {
+  background: #dc2626;
+}
+
+@keyframes alert-countdown-shrink {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.modal-footer-alert .btn {
+  min-width: 120px;
+}

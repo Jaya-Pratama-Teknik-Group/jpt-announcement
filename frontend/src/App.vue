@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import logoImg from "../logo.jpg";
+import AlertModal from "./components/AlertModal.vue";
 import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
 import HugeIcon from "./components/HugeIcon.vue";
 import PlaybackNotificationModal from "./components/PlaybackNotificationModal.vue";
@@ -30,8 +31,17 @@ const settings = ref<AppConfig>({
 });
 const logs = ref<LogEntry[]>([]);
 
-const errorMsg = ref("");
-const infoMsg = ref("");
+const alertDialog = ref<{
+  open: boolean;
+  kind: "info" | "error";
+  message: string;
+  nonce: number;
+}>({
+  open: false,
+  kind: "info",
+  message: "",
+  nonce: 0
+});
 const busy = ref(false);
 const modalOpen = ref(false);
 const editingSchedule = ref<Schedule | null>(null);
@@ -134,13 +144,25 @@ async function refreshAll() {
 }
 
 function showError(err: unknown) {
-  errorMsg.value = err instanceof Error ? err.message : String(err);
-  infoMsg.value = "";
+  alertDialog.value = {
+    open: true,
+    kind: "error",
+    message: err instanceof Error ? err.message : String(err),
+    nonce: alertDialog.value.nonce + 1
+  };
 }
 
 function showInfo(msg: string) {
-  infoMsg.value = msg;
-  errorMsg.value = "";
+  alertDialog.value = {
+    open: true,
+    kind: "info",
+    message: msg,
+    nonce: alertDialog.value.nonce + 1
+  };
+}
+
+function closeAlertDialog() {
+  alertDialog.value.open = false;
 }
 
 function formatDays(days: number[]): string {
@@ -527,9 +549,6 @@ onUnmounted(() => {
 
     <!-- Konten Utama -->
     <main class="main-content">
-      <div v-if="errorMsg" class="notice notice-error">{{ errorMsg }}</div>
-      <div v-if="infoMsg" class="notice notice-info">{{ infoMsg }}</div>
-
       <div
         v-if="dashboard && !dashboard.platform.supportsBackgroundScheduler"
         class="notice notice-warning"
@@ -1113,6 +1132,15 @@ onUnmounted(() => {
       @toggle-pause="handleTogglePauseAudio"
       @stop="handleStopAudio"
       @dismiss="dismissPlaybackNotification"
+    />
+
+    <AlertModal
+      :open="alertDialog.open"
+      :kind="alertDialog.kind"
+      :message="alertDialog.message"
+      :nonce="alertDialog.nonce"
+      :auto-close-seconds="10"
+      @close="closeAlertDialog"
     />
   </div>
 </template>
