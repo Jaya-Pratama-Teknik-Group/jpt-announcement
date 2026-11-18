@@ -91,9 +91,53 @@ Launch normally or minimized directly to the system tray:
 .\bin\JPTAnnounce.exe --hidden
 ```
 
-*(Optional installers: `wails3 package` builds an NSIS installer if NSIS is installed, or `wails3 task windows:package FORMAT=msix` for MSIX.)*
+### 4. Build Windows Installer (`.exe` Setup)
 
-### 4. Run Tests & Checks
+The easiest way to distribute the application is to build an **NSIS installer** that installs to `C:\Program Files\JPT\JPT Announce`, creates Start Menu & Desktop shortcuts, registers in **Add/Remove Programs**, and bundles the WebView2 runtime bootstrapper.
+
+#### Option A — Automated script (recommended)
+
+```powershell
+# Run as Administrator (required for C:\Program Files install)
+.\scripts\build-installer.ps1
+```
+
+The script will:
+1. Auto-install **NSIS** via Winget/Chocolatey/manual if not found.
+2. Build the production frontend.
+3. Build the production `.exe`.
+4. Run `makensis` to produce `bin\JPT Announce-amd64-setup.exe`.
+
+#### Option B — Wails task
+
+```powershell
+# Install NSIS manually first: https://nsis.sourceforge.io/Download
+wails3 task windows:package
+# Output: bin\JPT Announce-amd64-setup.exe
+```
+
+#### Option C — Per-user install (no Admin / UAC)
+
+If you do not need system-wide `C:\Program Files` installation:
+
+```powershell
+wails3 task windows:package INSTALL_SCOPE=user
+# Installs to: %LOCALAPPDATA%\Programs\JPT\JPT Announce
+```
+
+#### Installer features
+
+| Feature | Detail |
+|---|---|
+| Install location | `C:\Program Files\JPT\JPT Announce\` |
+| Start Menu shortcut | `Programs → JPT → JPT Announce` |
+| Desktop shortcut | `JPT Announce.lnk` |
+| Add/Remove Programs | Registered for clean uninstall |
+| WebView2 | Bundled bootstrapper; skipped if already installed |
+| Uninstaller | Removes files, shortcuts, and autostart registry entry |
+| Autostart | Managed from inside the app (Settings tab) after install |
+
+### 5. Run Tests & Checks
 
 ```powershell
 go test ./...

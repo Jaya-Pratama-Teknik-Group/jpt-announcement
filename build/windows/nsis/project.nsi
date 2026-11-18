@@ -1,116 +1,135 @@
 Unicode true
 
 ####
-## Please note: Template replacements don't work in this file. They are provided with default defines like
-## mentioned underneath.
+## Please note: Template replacements don't work in this file. They are provided with default defines.
 ## If the keyword is not defined, "wails_tools.nsh" will populate them.
-## If they are defined here, "wails_tools.nsh" will not touch them. This allows you to use this project.nsi manually
-## from outside of Wails for debugging and development of the installer.
-## 
-## For development first make a wails nsis build to populate the "wails_tools.nsh":
-## > wails build --target windows/amd64 --nsis
-## Then you can call makensis on this file with specifying the path to your binary:
-## For a AMD64 only installer:
-## > makensis -DARG_WAILS_AMD64_BINARY=..\..\bin\app.exe
-## For a ARM64 only installer:
-## > makensis -DARG_WAILS_ARM64_BINARY=..\..\bin\app.exe
-## For a installer with both architectures:
-## > makensis -DARG_WAILS_AMD64_BINARY=..\..\bin\app-amd64.exe -DARG_WAILS_ARM64_BINARY=..\..\bin\app-arm64.exe
+## If they are defined here, "wails_tools.nsh" will not touch them.
+##
+## For development first build to populate "wails_tools.nsh":
+##   > wails3 task windows:package
+## Then call makensis manually:
+##   AMD64:  makensis -DARG_WAILS_AMD64_BINARY=..\..\..\bin\JPTAnnounce.exe project.nsi
+##   ARM64:  makensis -DARG_WAILS_ARM64_BINARY=..\..\..\bin\JPTAnnounce.exe project.nsi
 ####
-## The following information is taken from the wails_tools.nsh file, but they can be overwritten here.
-####
-## !define INFO_PROJECTNAME    "my-project" # Default "JPT Announce"
-## !define INFO_COMPANYNAME    "My Company" # Default "JPT"
-## !define INFO_PRODUCTNAME    "My Product Name" # Default "JPT Announce"
-## !define INFO_PRODUCTVERSION "1.0.0"     # Default "0.1.0"
-## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "Copyright (c) 2026 JPT"
-###
-## !define PRODUCT_EXECUTABLE  "Application.exe"      # Default "${INFO_PROJECTNAME}.exe"
-## !define UNINST_KEY_NAME     "UninstKeyInRegistry"  # Default "${INFO_COMPANYNAME}${INFO_PRODUCTNAME}"
-####
-## !define REQUEST_EXECUTION_LEVEL "admin"            # Default "admin"  see also https://nsis.sourceforge.io/Docs/Chapter4.html
-## !define WAILS_INSTALL_SCOPE     "user"             # Default "machine" - set to "user" for per-user install ($LOCALAPPDATA) without UAC prompt
-####
+
 ## Include the wails tools
-####
 !include "wails_tools.nsh"
 
-# The version information for this two must consist of 4 parts
+# --- Version info embedded in the installer PE header ---
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
-
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
-VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
+VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Setup"
 VIAddVersionKey "ProductVersion"  "${INFO_PRODUCTVERSION}"
 VIAddVersionKey "FileVersion"     "${INFO_PRODUCTVERSION}"
 VIAddVersionKey "LegalCopyright"  "${INFO_COPYRIGHT}"
 VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 
-# Enable HiDPI support. https://nsis.sourceforge.io/Reference/ManifestDPIAware
 ManifestDPIAware true
 
-!include "MUI.nsh"
+!include "MUI2.nsh"
 
-!define MUI_ICON "..\icon.ico"
+# --- Installer / Uninstaller icons ---
+!define MUI_ICON   "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
-# !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
-!define MUI_FINISHPAGE_NOAUTOCLOSE # Wait on the INSTFILES page so the user can take a look into the details of the installation steps
-!define MUI_ABORTWARNING # This will warn the user if they exit from the installer.
 
-!insertmacro MUI_PAGE_WELCOME # Welcome to the installer page.
-# !insertmacro MUI_PAGE_LICENSE "resources\eula.txt" # Adds a EULA page to the installer
-!insertmacro MUI_PAGE_DIRECTORY # In which folder install page.
-!insertmacro MUI_PAGE_INSTFILES # Installing page.
-!insertmacro MUI_PAGE_FINISH # Finished installation page.
+# --- Finish page options ---
+!define MUI_FINISHPAGE_NOAUTOCLOSE
+!define MUI_ABORTWARNING
+!define MUI_ABORTWARNING_TEXT "Apakah Anda yakin ingin membatalkan instalasi ${INFO_PRODUCTNAME}?"
 
-!insertmacro MUI_UNPAGE_INSTFILES # Uninstalling page
+!define MUI_FINISHPAGE_RUN          "$INSTDIR\${PRODUCT_EXECUTABLE}"
+!define MUI_FINISHPAGE_RUN_TEXT     "Jalankan ${INFO_PRODUCTNAME} setelah selesai"
 
-!insertmacro MUI_LANGUAGE "English" # Set the Language of the installer
+# --- Welcome page text (Bahasa Indonesia) ---
+!define MUI_WELCOMEPAGE_TITLE "Selamat Datang di Installer ${INFO_PRODUCTNAME}"
+!define MUI_WELCOMEPAGE_TEXT "Wizard ini akan memandu Anda menginstal ${INFO_PRODUCTNAME} ${INFO_PRODUCTVERSION}.$\r$\n$\r$\nAplikasi ini digunakan untuk menjadwalkan dan memutar pengumuman audio secara otomatis di komputer Windows.$\r$\n$\r$\nDisarankan menutup semua aplikasi lain sebelum melanjutkan."
+!define MUI_FINISHPAGE_TITLE "Instalasi ${INFO_PRODUCTNAME} Selesai"
+!define MUI_FINISHPAGE_TEXT "${INFO_PRODUCTNAME} telah berhasil diinstal.$\r$\n$\r$\nKlik Selesai untuk menutup wizard ini."
 
-## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
-#!uninstfinalize 'signtool --file "%1"'
-#!finalize 'signtool --file "%1"'
+# --- Installer pages ---
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 
+# --- Uninstaller pages ---
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+# --- Languages (default = Indonesian, fallback English) ---
+!insertmacro MUI_LANGUAGE "Indonesian"
+!insertmacro MUI_LANGUAGE "English"
+
+# --- Output settings ---
 Name "${INFO_PRODUCTNAME}"
-OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
+OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-setup.exe"
+
+# Install to C:\Program Files\JPT\JPT Announce  (requires admin / UAC)
+# To install to %LOCALAPPDATA% without UAC, pass -DWAILS_INSTALL_SCOPE=user
 !if "${WAILS_INSTALL_SCOPE}" == "user"
-    InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+    InstallDir "$LOCALAPPDATA\Programs\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !else
     InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !endif
-ShowInstDetails show # This will always show the installation details.
+
+ShowInstDetails show
+ShowUninstDetails show
 
 Function .onInit
-   !insertmacro wails.checkArchitecture
+    !insertmacro wails.checkArchitecture
 FunctionEnd
 
-Section
+# =====================================================================
+# INSTALL SECTION
+# =====================================================================
+Section "Aplikasi Utama" SecMain
     !insertmacro wails.setShellContext
 
+    # Install / update WebView2 runtime if not already present
     !insertmacro wails.webview2runtime
 
     SetOutPath $INSTDIR
-    
+
+    # Copy the application executable
     !insertmacro wails.files
 
-    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    # Shortcut: Start Menu > Programs > JPT > JPT Announce
+    CreateDirectory "$SMPROGRAMS\${INFO_COMPANYNAME}"
+    CreateShortcut "$SMPROGRAMS\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}.lnk" \
+        "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 \
+        SW_SHOWNORMAL "" "Penjadwalan Pengumuman Audio Otomatis"
+
+    # Shortcut: Desktop
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" \
+        "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
 
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
-    
+
+    # Write uninstaller + Add/Remove Programs entry
     !insertmacro wails.writeUninstaller
 SectionEnd
 
-Section "uninstall" 
+# =====================================================================
+# UNINSTALL SECTION
+# =====================================================================
+Section "Uninstall"
     !insertmacro wails.setShellContext
 
-    RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
-
+    # Remove application files
     RMDir /r $INSTDIR
 
-    Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
+    # Remove WebView2 temp data
+    RMDir /r "$AppData\${PRODUCT_EXECUTABLE}"
+
+    # Remove shortcuts
+    Delete "$SMPROGRAMS\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}.lnk"
+    RMDir  "$SMPROGRAMS\${INFO_COMPANYNAME}"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
+
+    # Remove autostart registry entry if the user had enabled it
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "JPTAnnounce"
 
     !insertmacro wails.unassociateFiles
     !insertmacro wails.unassociateCustomProtocols

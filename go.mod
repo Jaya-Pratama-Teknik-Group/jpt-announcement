@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/wailsapp/wails/v3 v3.1.0
+	golang.org/x/sys v0.48.0
 )
 
 require (
@@ -16,6 +17,5 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 )
