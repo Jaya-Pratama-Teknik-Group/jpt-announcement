@@ -94,13 +94,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop modal-backdrop-alert" @click.self="emit('close')">
-    <div
-      class="modal-panel modal-confirm modal-alert"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="alert-modal-title"
-    >
+  <Transition name="modal-fade">
+    <div v-if="open" class="modal-backdrop modal-backdrop-alert" @click.self="emit('close')">
+      <div
+        class="modal-panel modal-confirm modal-alert"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="alert-modal-title"
+      >
       <div class="confirm-header">
         <div
           class="confirm-icon-ring"
@@ -161,4 +162,5 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  </Transition>
 </template>

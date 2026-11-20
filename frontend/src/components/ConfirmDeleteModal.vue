@@ -32,13 +32,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="!busy && emit('close')">
-    <div
-      class="modal-panel modal-confirm"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="confirm-delete-title"
-    >
+  <Transition name="modal-fade">
+    <div v-if="open" class="modal-backdrop" @click.self="!busy && emit('close')">
+      <div
+        class="modal-panel modal-confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-delete-title"
+      >
       <div class="confirm-header">
         <div class="confirm-icon-ring">
           <HugeIcon name="delete-02" :size="24" />
@@ -78,4 +79,5 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  </Transition>
 </template>

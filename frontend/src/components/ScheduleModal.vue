@@ -167,8 +167,9 @@ function submitForm() {
 </script>
 
 <template>
-  <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+  <Transition name="modal-fade">
+    <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
       <div class="modal-header">
         <div class="modal-title-group">
           <div class="modal-title-icon">
@@ -313,7 +314,14 @@ function submitForm() {
               <HugeIcon name="volume-high" :size="16" />
               <span>Volume: {{ form.volume }}%</span>
             </label>
-            <input id="sch-volume" v-model.number="form.volume" type="range" min="0" max="100" />
+            <input
+              id="sch-volume"
+              v-model.number="form.volume"
+              class="range-slider"
+              type="range"
+              min="0"
+              max="100"
+            />
           </div>
 
           <div class="switch-row" style="padding: 4px 0 0">
@@ -348,4 +356,5 @@ function submitForm() {
       </form>
     </div>
   </div>
+  </Transition>
 </template>

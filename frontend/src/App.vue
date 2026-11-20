@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import logoImg from "../logo.jpg";
 import AlertModal from "./components/AlertModal.vue";
+import AppTopBar from "./components/AppTopBar.vue";
+import BottomDock, { type DockNavItem } from "./components/BottomDock.vue";
 import ConfirmDeleteModal from "./components/ConfirmDeleteModal.vue";
-import HugeIcon from "./components/HugeIcon.vue";
 import PlaybackNotificationModal from "./components/PlaybackNotificationModal.vue";
 import ScheduleModal from "./components/ScheduleModal.vue";
+import AudioView from "./views/AudioView.vue";
+import DashboardView from "./views/DashboardView.vue";
+import SchedulesView from "./views/SchedulesView.vue";
+import SettingsView from "./views/SettingsView.vue";
 import { api } from "./api/bridge";
-import type { HugeIconName } from "./icons/register";
-import {
-  HARI_INDONESIA,
-  type AppConfig,
-  type AudioAsset,
-  type DashboardState,
-  type LogEntry,
-  type NavTab,
-  type Schedule
+import { formatDays, formatSize, formatTimes } from "./utils/formatters";
+import type {
+  AppConfig,
+  AudioAsset,
+  DashboardState,
+  LogEntry,
+  NavTab,
+  Schedule
 } from "./types/models";
 
 const activeTab = ref<NavTab>("dashboard");
@@ -65,8 +68,6 @@ const deleteDialog = ref<{
   itemDetail: "",
   description: ""
 });
-const fileInputRef = ref<HTMLInputElement | null>(null);
-const scheduleImportInputRef = ref<HTMLInputElement | null>(null);
 const countdownTick = ref(Date.now());
 const dismissedPlaybackKey = ref("");
 
@@ -91,7 +92,7 @@ let unsubState: (() => void) | null = null;
 let unsubNav: (() => void) | null = null;
 let timerId: number | null = null;
 
-const navItems: { id: NavTab; label: string; short: string; icon: HugeIconName }[] = [
+const navItems: DockNavItem[] = [
   { id: "dashboard", label: "Dasbor", short: "Dasbor", icon: "home-03" },
   { id: "schedules", label: "Jadwal", short: "Jadwal", icon: "calendar-03" },
   { id: "audio", label: "Audio", short: "Audio", icon: "music-note-03" },
@@ -168,34 +169,6 @@ function closeAlertDialog() {
   alertDialog.value.open = false;
 }
 
-function formatDays(days: number[]): string {
-  if (!days || days.length === 0 || days.length === 7) return "Setiap hari";
-  return HARI_INDONESIA.filter((h) => days.includes(h.value))
-    .map((h) => h.short)
-    .join(", ");
-}
-
-function formatTimes(item: Schedule): string[] {
-  if (item.timesOfDay && item.timesOfDay.length > 0) return item.timesOfDay;
-  return item.timeOfDay ? [item.timeOfDay] : [];
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function formatTime(iso?: string): string {
-  if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString("id-ID", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  });
-}
-
 function openCreateSchedule() {
   editingSchedule.value = null;
   modalOpen.value = true;
@@ -267,33 +240,24 @@ async function handleExportSchedules() {
   }
 }
 
-async function handleImportSchedules() {
-  if (dashboard.value?.platform.supportsNativeFilePicker) {
-    busy.value = true;
-    try {
-      const imported = await api.pickAndImportSchedules();
-      if (imported && imported.length > 0) {
-        showInfo(
-          `${imported.length} jadwal berhasil diimpor (status Nonaktif). Pilih audio untuk setiap jadwal sebelum mengaktifkannya.`
-        );
-        await refreshAll();
-      }
-    } catch (err) {
-      showError(err);
-    } finally {
-      busy.value = false;
+async function handleImportSchedulesNative() {
+  busy.value = true;
+  try {
+    const imported = await api.pickAndImportSchedules();
+    if (imported && imported.length > 0) {
+      showInfo(
+        `${imported.length} jadwal berhasil diimpor (status Nonaktif). Pilih audio untuk setiap jadwal sebelum mengaktifkannya.`
+      );
+      await refreshAll();
     }
-    return;
+  } catch (err) {
+    showError(err);
+  } finally {
+    busy.value = false;
   }
-  scheduleImportInputRef.value?.click();
 }
 
-async function handleScheduleFileSelected(ev: Event) {
-  const input = ev.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file) return;
-
+async function handleScheduleFileSelected(file: File) {
   busy.value = true;
   try {
     const rawJSON = await file.text();
@@ -309,31 +273,22 @@ async function handleScheduleFileSelected(ev: Event) {
   }
 }
 
-async function handlePickAudio() {
-  if (dashboard.value?.platform.supportsNativeFilePicker) {
-    busy.value = true;
-    try {
-      const added = await api.pickAndImportAudio();
-      if (added) {
-        showInfo(`Audio "${added.name}" berhasil ditambahkan.`);
-        await refreshAll();
-      }
-    } catch (err) {
-      showError(err);
-    } finally {
-      busy.value = false;
+async function handlePickAudioNative() {
+  busy.value = true;
+  try {
+    const added = await api.pickAndImportAudio();
+    if (added) {
+      showInfo(`Audio "${added.name}" berhasil ditambahkan.`);
+      await refreshAll();
     }
-    return;
+  } catch (err) {
+    showError(err);
+  } finally {
+    busy.value = false;
   }
-  fileInputRef.value?.click();
 }
 
-async function handleWebFileSelected(ev: Event) {
-  const input = ev.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file) return;
-
+async function handleWebFileSelected(file: File) {
   busy.value = true;
   try {
     const buffer = await file.arrayBuffer();
@@ -503,67 +458,12 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell">
-    <!-- Sidebar Desktop / Layar Lebar -->
-    <aside class="sidebar">
-      <div class="brand brand-card">
-        <div class="brand-logo-wrap">
-          <img :src="logoImg" alt="Logo JPT Pengumuman Terjadwal" class="brand-logo" />
-        </div>
-        <div>
-          <p class="brand-title">JPT Announce</p>
-          <p class="brand-sub">Pengumuman Terjadwal</p>
-        </div>
-      </div>
+    <AppTopBar
+      :scheduler-running="Boolean(dashboard?.schedulerRunning)"
+      :platform-name="dashboard?.platform.platform"
+      :playback="dashboard?.playback"
+    />
 
-      <nav class="sidebar-nav">
-        <button
-          v-for="item in navItems"
-          :key="item.id"
-          type="button"
-          class="sidebar-btn"
-          :class="[`tab-${item.id}`, { active: activeTab === item.id }]"
-          @click="activeTab = item.id"
-        >
-          <span class="nav-icon-wrap">
-            <HugeIcon :name="item.icon" :size="18" />
-          </span>
-          <span>{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div style="margin-top: auto">
-        <span
-          class="badge"
-          :class="dashboard?.schedulerRunning ? 'badge-success' : 'badge-muted'"
-        >
-          <HugeIcon name="activity-01" :size="14" />
-          {{ dashboard?.schedulerRunning ? "Penjadwal Aktif" : "Penjadwal Nonaktif" }}
-        </span>
-      </div>
-    </aside>
-
-    <!-- Header Mobile -->
-    <header class="mobile-header">
-      <div class="brand">
-        <div class="brand-logo-wrap">
-          <img :src="logoImg" alt="Logo JPT Pengumuman Terjadwal" class="brand-logo" />
-        </div>
-        <div>
-          <p class="brand-title">JPT Announce</p>
-          <p class="brand-sub">
-            {{ dashboard?.platform.platform === "android" ? "Mode Android" : "Pengumuman Terjadwal" }}
-          </p>
-        </div>
-      </div>
-      <span
-        class="badge"
-        :class="dashboard?.schedulerRunning ? 'badge-success' : 'badge-muted'"
-      >
-        {{ dashboard?.schedulerRunning ? "Aktif" : "Mati" }}
-      </span>
-    </header>
-
-    <!-- Konten Utama -->
     <main class="main-content">
       <div
         v-if="dashboard && !dashboard.platform.supportsBackgroundScheduler"
@@ -574,624 +474,68 @@ onUnmounted(() => {
         latar belakang Android khusus dan belum aktif pada versi MVP ini.
       </div>
 
-      <!-- TAB: DASBOR -->
-      <section v-if="activeTab === 'dashboard'">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Dasbor Pengumuman</h1>
-            <p class="page-subtitle">Pantau status penjadwal dan pemutaran audio terkini</p>
-          </div>
-          <div class="btn-row">
-            <button
-              v-if="
-                dashboard?.platform.supportsLiveAnnouncement &&
-                (settings.liveAnnouncementEnabled || dashboard?.playback.isLive)
-              "
-              class="btn"
-              :class="dashboard?.playback.isLive ? 'btn-danger-solid' : 'btn-soft-primary'"
-              type="button"
-              @click="handleToggleLiveAnnouncement"
-            >
-              <HugeIcon :name="dashboard?.playback.isLive ? 'stop' : 'mic-01'" :size="17" />
-              <span>
-                {{
-                  dashboard?.playback.isLive
-                    ? "Matikan Mikrofon (Aktif)"
-                    : "Pengumuman Langsung"
-                }}
-              </span>
-            </button>
-            <button class="btn btn-primary" type="button" @click="openCreateSchedule">
-              <HugeIcon name="add-01" :size="17" />
-              <span>Tambah Jadwal</span>
-            </button>
-            <button
-              v-if="dashboard?.playback.isPlaying && !dashboard.playback.isLive"
-              class="btn btn-soft-primary"
-              type="button"
-              @click="handleTogglePauseAudio"
-            >
-              <HugeIcon :name="dashboard.playback.isPaused ? 'play' : 'pause'" :size="17" />
-              <span>{{ dashboard.playback.isPaused ? "Lanjutkan" : "Jeda" }}</span>
-            </button>
-            <button
-              v-if="dashboard?.playback.isPlaying && !dashboard.playback.isLive"
-              class="btn btn-danger"
-              type="button"
-              @click="handleStopAudio"
-            >
-              <HugeIcon name="stop" :size="17" />
-              <span>Hentikan Audio</span>
-            </button>
-          </div>
-        </div>
+      <Transition name="view-fade" mode="out-in">
+        <DashboardView
+          v-if="activeTab === 'dashboard'"
+          key="dashboard"
+          :dashboard="dashboard"
+          :settings="settings"
+          :live-countdown-text="liveCountdownText"
+          @create-schedule="openCreateSchedule"
+          @toggle-live="handleToggleLiveAnnouncement"
+          @toggle-pause="handleTogglePauseAudio"
+          @stop-audio="handleStopAudio"
+          @play-schedule-now="handlePlayScheduleNow"
+          @navigate-schedules="activeTab = 'schedules'"
+        />
 
-        <div class="grid-cards">
-          <div class="card">
-            <div class="card-head">
-              <p class="card-title">Status Penjadwal</p>
-              <span class="card-icon-chip chip-sky">
-                <HugeIcon name="activity-01" :size="17" />
-              </span>
-            </div>
-            <p class="metric-value">
-              {{ dashboard?.schedulerRunning ? "Berjalan" : "Berhenti" }}
-            </p>
-            <span
-              class="badge"
-              :class="dashboard?.schedulerRunning ? 'badge-success' : 'badge-warning'"
-            >
-              {{ dashboard?.activeScheduleCount ?? 0 }} jadwal aktif
-            </span>
-          </div>
+        <SchedulesView
+          v-else-if="activeTab === 'schedules'"
+          key="schedules"
+          :schedules="schedules"
+          :audios="audios"
+          :audio-name-map="audioNameMap"
+          :schedules-without-audio-count="schedulesWithoutAudioCount"
+          :supports-native-file-picker="Boolean(dashboard?.platform.supportsNativeFilePicker)"
+          :busy="busy"
+          @export-schedules="handleExportSchedules"
+          @import-schedules="handleImportSchedulesNative"
+          @import-schedule-file="handleScheduleFileSelected"
+          @create-schedule="openCreateSchedule"
+          @play-schedule-now="handlePlayScheduleNow"
+          @toggle-schedule="handleToggleSchedule"
+          @edit-schedule="openEditSchedule"
+          @delete-schedule="handleDeleteSchedule"
+        />
 
-          <div class="card">
-            <div class="card-head">
-              <p class="card-title">Total Jadwal</p>
-              <span class="card-icon-chip chip-lavender">
-                <HugeIcon name="clock-01" :size="17" />
-              </span>
-            </div>
-            <p class="metric-value">{{ dashboard?.totalScheduleCount ?? 0 }}</p>
-            <span class="badge badge-muted">Tersimpan lokal</span>
-          </div>
+        <AudioView
+          v-else-if="activeTab === 'audio'"
+          key="audio"
+          :audios="audios"
+          :playback="dashboard?.playback"
+          :supports-native-file-picker="Boolean(dashboard?.platform.supportsNativeFilePicker)"
+          :busy="busy"
+          @pick-audio="handlePickAudioNative"
+          @import-audio-file="handleWebFileSelected"
+          @play-audio="handlePlayAudio"
+          @stop-audio="handleStopAudio"
+          @delete-audio="handleDeleteAudio"
+        />
 
-          <div class="card">
-            <div class="card-head">
-              <p class="card-title">Koleksi Audio</p>
-              <span class="card-icon-chip chip-mint">
-                <HugeIcon name="file-audio" :size="17" />
-              </span>
-            </div>
-            <p class="metric-value">{{ dashboard?.totalAudioCount ?? 0 }}</p>
-            <span class="badge badge-primary">.mp3, .mpeg &amp; .wav</span>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <p class="card-title">Status Pemutaran</p>
-              <span class="card-icon-chip chip-amber">
-                <HugeIcon name="audio-wave-01" :size="17" />
-              </span>
-            </div>
-            <p class="metric-value" style="font-size: 1.15rem">
-              {{
-                dashboard?.playback.isPlaying
-                  ? dashboard.playback.audioName || "Memutar..."
-                  : "Siaga"
-              }}
-            </p>
-            <span
-              class="badge"
-              :class="
-                dashboard?.playback.isPlaying
-                  ? dashboard.playback.isLive
-                    ? 'badge-danger'
-                    : dashboard.playback.isPaused
-                      ? 'badge-warning'
-                      : 'badge-primary'
-                  : 'badge-muted'
-              "
-            >
-              {{
-                dashboard?.playback.isPlaying
-                  ? dashboard.playback.isLive
-                    ? "Siaran Langsung"
-                    : dashboard.playback.isPaused
-                      ? "Dijeda"
-                      : "Sedang diputar"
-                  : "Tidak ada audio"
-              }}
-            </span>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <p class="card-title">Pengumuman Berikutnya</p>
-            <span class="card-icon-chip chip-lavender">
-              <HugeIcon name="notification-02" :size="17" />
-            </span>
-          </div>
-          <template v-if="dashboard?.nextAnnouncement">
-            <h3 style="margin: 0 0 6px">{{ dashboard.nextAnnouncement.title }}</h3>
-            <p class="page-subtitle" style="margin-bottom: 12px">
-              Jam {{ new Date(dashboard.nextAnnouncement.scheduledAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }) }}
-              &bull; Audio: {{ dashboard.nextAnnouncement.audioName || "-" }}
-              &bull; Hitung mundur: <strong>{{ liveCountdownText }}</strong>
-            </p>
-            <div class="btn-row">
-              <button
-                class="btn btn-primary"
-                type="button"
-                @click="handlePlayScheduleNow(dashboard.nextAnnouncement.scheduleId)"
-              >
-                <HugeIcon name="play" :size="17" />
-                <span>Putar Sekarang</span>
-              </button>
-              <button
-                v-if="dashboard.playback.isPlaying"
-                class="btn btn-danger"
-                type="button"
-                @click="handleStopAudio"
-              >
-                <HugeIcon name="stop" :size="17" />
-                <span>Hentikan Audio</span>
-              </button>
-            </div>
-          </template>
-          <template v-else>
-            <p class="page-subtitle" style="margin-bottom: 12px">
-              Belum ada jadwal pengumuman aktif. Tambahkan berkas audio dan buat jadwal pertama Anda.
-            </p>
-            <button class="btn" type="button" @click="activeTab = 'schedules'">
-              <HugeIcon name="calendar-03" :size="17" />
-              <span>Kelola Jadwal</span>
-            </button>
-          </template>
-        </div>
-      </section>
-
-      <!-- TAB: JADWAL -->
-      <section v-if="activeTab === 'schedules'">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Jadwal Pengumuman</h1>
-            <p class="page-subtitle">Atur waktu dan hari pemutaran audio otomatis</p>
-          </div>
-          <div class="btn-row">
-            <button
-              class="btn"
-              type="button"
-              :disabled="busy || schedules.length === 0"
-              @click="handleExportSchedules"
-            >
-              <HugeIcon name="file-export" :size="17" />
-              <span>Ekspor</span>
-            </button>
-            <button class="btn" type="button" :disabled="busy" @click="handleImportSchedules">
-              <HugeIcon name="file-import" :size="17" />
-              <span>Impor</span>
-            </button>
-            <button
-              class="btn btn-primary"
-              type="button"
-              :disabled="audios.length === 0"
-              @click="openCreateSchedule"
-            >
-              <HugeIcon name="add-01" :size="17" />
-              <span>Tambah Jadwal</span>
-            </button>
-          </div>
-          <input
-            ref="scheduleImportInputRef"
-            type="file"
-            accept=".json,application/json"
-            style="display: none"
-            @change="handleScheduleFileSelected"
-          />
-        </div>
-
-        <div v-if="audios.length === 0" class="notice notice-warning">
-          Tambahkan minimal satu berkas audio di menu <strong>Audio</strong> sebelum membuat atau
-          mengaktifkan jadwal.
-        </div>
-
-        <div v-if="schedulesWithoutAudioCount > 0" class="notice notice-warning">
-          Ada <strong>{{ schedulesWithoutAudioCount }} jadwal</strong> yang belum memiliki berkas
-          audio (hasil impor). Klik <strong>Pilih Audio</strong> pada jadwal tersebut agar dapat
-          diaktifkan.
-        </div>
-
-        <div v-if="schedules.length === 0" class="card">
-          <p class="page-subtitle">Belum ada jadwal pengumuman yang tersimpan.</p>
-        </div>
-
-        <!-- Tabel Desktop -->
-        <div v-if="schedules.length > 0" class="card desktop-only">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Judul</th>
-                <th>Jam</th>
-                <th>Hari</th>
-                <th>Audio</th>
-                <th>Volume</th>
-                <th>Status</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in schedules" :key="item.id">
-                <td>
-                  <strong>{{ item.title }}</strong>
-                  <div v-if="item.description" class="page-subtitle">{{ item.description }}</div>
-                </td>
-                <td>
-                  <div class="time-pills">
-                    <span v-for="t in formatTimes(item)" :key="t" class="time-pill">{{ t }}</span>
-                  </div>
-                </td>
-                <td>{{ formatDays(item.days) }}</td>
-                <td>
-                  <span v-if="hasValidAudio(item)">{{ audioNameMap.get(item.audioId) }}</span>
-                  <span v-else class="badge badge-warning">
-                    <HugeIcon name="alert-02" :size="14" />
-                    <span>Perlu pilih audio</span>
-                  </span>
-                </td>
-                <td>{{ item.volume }}%</td>
-                <td>
-                  <span class="badge" :class="item.enabled ? 'badge-success' : 'badge-muted'">
-                    {{ item.enabled ? "Aktif" : "Nonaktif" }}
-                  </span>
-                </td>
-                <td>
-                  <div class="btn-row">
-                    <button
-                      class="btn btn-sm"
-                      type="button"
-                      :disabled="!hasValidAudio(item)"
-                      @click="handlePlayScheduleNow(item.id)"
-                    >
-                      <HugeIcon name="play" :size="15" />
-                      <span>Putar</span>
-                    </button>
-                    <button
-                      class="btn btn-sm"
-                      type="button"
-                      :disabled="!item.enabled && !hasValidAudio(item)"
-                      :title="
-                        !item.enabled && !hasValidAudio(item)
-                          ? 'Pilih audio terlebih dahulu sebelum mengaktifkan'
-                          : ''
-                      "
-                      @click="handleToggleSchedule(item)"
-                    >
-                      <HugeIcon name="power" :size="15" />
-                      <span>{{ item.enabled ? "Matikan" : "Aktifkan" }}</span>
-                    </button>
-                    <button
-                      class="btn btn-sm"
-                      :class="!hasValidAudio(item) ? 'btn-primary' : ''"
-                      type="button"
-                      @click="openEditSchedule(item)"
-                    >
-                      <HugeIcon name="edit-02" :size="15" />
-                      <span>{{ hasValidAudio(item) ? "Ubah" : "Pilih Audio" }}</span>
-                    </button>
-                    <button
-                      class="btn btn-sm btn-danger"
-                      type="button"
-                      @click="handleDeleteSchedule(item)"
-                    >
-                      <HugeIcon name="delete-02" :size="15" />
-                      <span>Hapus</span>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Kartu Ringkas Mobile -->
-        <div v-if="schedules.length > 0" class="mobile-list">
-          <div v-for="item in schedules" :key="item.id" class="card">
-            <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px">
-              <div>
-                <h3 style="margin: 0">{{ item.title }}</h3>
-                <div class="time-pills" style="margin: 6px 0 4px">
-                  <span v-for="t in formatTimes(item)" :key="t" class="time-pill">{{ t }}</span>
-                </div>
-                <p class="page-subtitle">{{ formatDays(item.days) }}</p>
-              </div>
-              <span class="badge" :class="item.enabled ? 'badge-success' : 'badge-muted'">
-                {{ item.enabled ? "Aktif" : "Nonaktif" }}
-              </span>
-            </div>
-            <p class="page-subtitle" style="margin: 8px 0 12px">
-              Audio:
-              <template v-if="hasValidAudio(item)">{{ audioNameMap.get(item.audioId) }}</template>
-              <span v-else class="badge badge-warning">Perlu pilih audio</span>
-              &bull; Volume {{ item.volume }}%
-            </p>
-            <div class="btn-row">
-              <button
-                class="btn btn-sm btn-primary"
-                type="button"
-                :disabled="!hasValidAudio(item)"
-                @click="handlePlayScheduleNow(item.id)"
-              >
-                <HugeIcon name="play" :size="15" />
-                <span>Putar</span>
-              </button>
-              <button
-                class="btn btn-sm"
-                type="button"
-                :disabled="!item.enabled && !hasValidAudio(item)"
-                @click="handleToggleSchedule(item)"
-              >
-                <HugeIcon name="power" :size="15" />
-                <span>{{ item.enabled ? "Nonaktifkan" : "Aktifkan" }}</span>
-              </button>
-              <button
-                class="btn btn-sm"
-                :class="!hasValidAudio(item) ? 'btn-primary' : ''"
-                type="button"
-                @click="openEditSchedule(item)"
-              >
-                <HugeIcon name="edit-02" :size="15" />
-                <span>{{ hasValidAudio(item) ? "Ubah" : "Pilih Audio" }}</span>
-              </button>
-              <button class="btn btn-sm btn-danger" type="button" @click="handleDeleteSchedule(item)">
-                <HugeIcon name="delete-02" :size="15" />
-                <span>Hapus</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- TAB: AUDIO -->
-      <section v-if="activeTab === 'audio'">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Manajemen Audio</h1>
-            <p class="page-subtitle">Unggah dan uji berkas audio lokal (.mp3, .mpeg, .mpga, atau .wav)</p>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-primary" type="button" :disabled="busy" @click="handlePickAudio">
-              <HugeIcon name="add-01" :size="17" />
-              <span>Tambah Audio</span>
-            </button>
-            <button
-              v-if="dashboard?.playback.isPlaying"
-              class="btn btn-danger"
-              type="button"
-              @click="handleStopAudio"
-            >
-              <HugeIcon name="stop" :size="17" />
-              <span>Hentikan</span>
-            </button>
-          </div>
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept=".mp3,.mpeg,.mpga,.wav,audio/mpeg,audio/wav"
-            style="display: none"
-            @change="handleWebFileSelected"
-          />
-        </div>
-
-        <div v-if="audios.length === 0" class="card">
-          <p class="page-subtitle">
-            Belum ada berkas audio. Klik <strong>Tambah Audio</strong> untuk memilih berkas .mp3,
-            .mpeg, atau .wav dari perangkat Anda.
-          </p>
-        </div>
-
-        <div v-else class="card audio-list-card">
-          <div v-for="asset in audios" :key="asset.id" class="audio-row">
-            <div class="audio-row-main">
-              <span class="card-icon-chip chip-mint">
-                <HugeIcon name="file-audio" :size="18" />
-              </span>
-              <div class="audio-row-info">
-                <div class="audio-row-title-line">
-                  <strong class="audio-row-title">{{ asset.name }}</strong>
-                  <span class="badge badge-primary">.{{ asset.format }}</span>
-                </div>
-                <p class="page-subtitle audio-row-meta">
-                  {{ asset.fileName }} &bull; {{ formatSize(asset.sizeBytes) }}
-                </p>
-              </div>
-            </div>
-            <div class="btn-row audio-row-actions">
-              <button
-                v-if="dashboard?.playback.isPlaying && dashboard.playback.audioId === asset.id"
-                class="btn btn-sm btn-danger"
-                type="button"
-                @click="handleStopAudio"
-              >
-                <HugeIcon name="stop" :size="15" />
-                <span>Hentikan</span>
-              </button>
-              <button
-                v-else
-                class="btn btn-sm btn-primary"
-                type="button"
-                @click="handlePlayAudio(asset.id)"
-              >
-                <HugeIcon name="play" :size="15" />
-                <span>Uji Putar</span>
-              </button>
-              <button class="btn btn-sm btn-danger" type="button" @click="handleDeleteAudio(asset)">
-                <HugeIcon name="delete-02" :size="15" />
-                <span>Hapus</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- TAB: PENGATURAN -->
-      <section v-if="activeTab === 'settings'">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Pengaturan Aplikasi</h1>
-            <p class="page-subtitle">Konfigurasi perilaku penjadwal, audio, dan startup platform</p>
-          </div>
-        </div>
-
-        <div class="card" style="margin-bottom: 16px">
-          <div class="switch-row">
-            <div>
-              <strong>Aktifkan Penjadwal Otomatis</strong>
-              <p class="page-subtitle">Jalankan pemutaran audio otomatis sesuai jadwal aktif</p>
-            </div>
-            <input v-model="settings.schedulerEnabled" class="switch-input" type="checkbox" />
-          </div>
-
-          <div v-if="dashboard?.platform.supportsAutostart" class="switch-row">
-            <div>
-              <strong>Jalankan otomatis saat Windows dimulai</strong>
-              <p class="page-subtitle">
-                Status saat ini:
-                <strong>{{ settings.autostartEnabled ? "Aktif" : "Nonaktif" }}</strong> &bull;
-                Mulai tersembunyi ke system tray saat login Windows (tanpa hak admin)
-              </p>
-            </div>
-            <button
-              class="btn btn-sm"
-              :class="settings.autostartEnabled ? 'btn-primary' : ''"
-              type="button"
-              :disabled="busy"
-              @click="handleToggleAutostart"
-            >
-              {{ settings.autostartEnabled ? "Aktif (Matikan)" : "Aktifkan" }}
-            </button>
-          </div>
-
-          <div v-if="dashboard?.platform.supportsSystemTray" class="switch-row">
-            <div>
-              <strong>Sembunyikan ke Tray Saat Login</strong>
-              <p class="page-subtitle">
-                Saat dijalankan otomatis di login Windows, aplikasi mulai tersembunyi di system
-                tray; menutup jendela utama juga akan menyembunyikannya ke tray
-              </p>
-            </div>
-            <input v-model="settings.startMinimized" class="switch-input" type="checkbox" />
-          </div>
-
-          <div class="field" style="margin-top: 14px">
-            <label for="cfg-vol" style="display: inline-flex; align-items: center; gap: 6px">
-              <HugeIcon name="volume-high" :size="16" />
-              <span>Volume Bawaan: {{ settings.defaultVolume }}%</span>
-            </label>
-            <input id="cfg-vol" v-model.number="settings.defaultVolume" type="range" min="0" max="100" />
-          </div>
-
-          <template v-if="dashboard?.platform.supportsAudioDucking">
-            <div class="switch-row" style="margin-top: 14px">
-              <div>
-                <strong>Kecilkan Volume Aplikasi Lain Saat Pengumuman</strong>
-                <p class="page-subtitle">
-                  Otomatis menurunkan volume musik atau aplikasi lain di Windows selama pengumuman
-                  diputar, lalu mengembalikannya setelah selesai
-                </p>
-              </div>
-              <input v-model="settings.duckOtherAudio" class="switch-input" type="checkbox" />
-            </div>
-
-            <div v-if="settings.duckOtherAudio" class="field" style="margin-top: 10px">
-              <label for="cfg-duck-vol" style="display: inline-flex; align-items: center; gap: 6px">
-                <HugeIcon name="volume-high" :size="16" />
-                <span>Sisa Volume Aplikasi Lain: {{ settings.duckVolumePercent }}%</span>
-              </label>
-              <input
-                id="cfg-duck-vol"
-                v-model.number="settings.duckVolumePercent"
-                type="range"
-                min="0"
-                max="100"
-              />
-              <p class="page-subtitle" style="margin-top: 4px">
-                Contoh: 25% menurunkan volume musik dari 80% menjadi 20% selama pengumuman berlangsung
-              </p>
-            </div>
-          </template>
-
-          <div v-if="dashboard?.platform.supportsLiveAnnouncement" class="switch-row" style="margin-top: 14px">
-            <div>
-              <strong>Tampilkan Tombol Pengumuman Langsung</strong>
-              <p class="page-subtitle">
-                Menampilkan tombol &ldquo;Pengumuman Langsung&rdquo; di Dasbor untuk berbicara
-                langsung melalui mikrofon ke pengeras suara (disembunyikan secara bawaan)
-              </p>
-            </div>
-            <input
-              v-model="settings.liveAnnouncementEnabled"
-              class="switch-input"
-              type="checkbox"
-            />
-          </div>
-
-          <div class="btn-row" style="margin-top: 16px">
-            <button class="btn btn-primary" type="button" :disabled="busy" @click="handleSaveSettings">
-              <HugeIcon name="checkmark-circle-02" :size="17" />
-              <span>Simpan Pengaturan</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3 style="margin: 0 0 12px">Log Aktivitas Terbaru</h3>
-          <p v-if="logs.length === 0" class="page-subtitle">Belum ada catatan aktivitas.</p>
-          <div v-else class="form-stack">
-            <div
-              v-for="(entry, idx) in logs.slice(0, 20)"
-              :key="idx"
-              style="border-bottom: 1px solid var(--border); padding-bottom: 8px"
-            >
-              <div style="display: flex; justify-content: space-between; gap: 8px">
-                <span
-                  class="badge"
-                  :class="
-                    entry.level === 'ERROR'
-                      ? 'badge-danger'
-                      : entry.level === 'WARN'
-                        ? 'badge-warning'
-                        : 'badge-muted'
-                  "
-                >
-                  {{ entry.level }} &bull; {{ entry.source }}
-                </span>
-                <span class="page-subtitle">{{ formatTime(entry.timestamp) }}</span>
-              </div>
-              <p style="margin: 4px 0 0; font-size: 0.9rem">{{ entry.message }}</p>
-            </div>
-          </div>
-        </div>
-      </section>
+        <SettingsView
+          v-else
+          key="settings"
+          v-model="settings"
+          :platform="dashboard?.platform"
+          :logs="logs"
+          :busy="busy"
+          @save-settings="handleSaveSettings"
+          @toggle-autostart="handleToggleAutostart"
+        />
+      </Transition>
     </main>
 
-    <!-- Bottom Navigation Mobile -->
-    <nav class="bottom-nav">
-      <button
-        v-for="item in navItems"
-        :key="item.id"
-        type="button"
-        class="bottom-nav-btn"
-        :class="[`tab-${item.id}`, { active: activeTab === item.id }]"
-        @click="activeTab = item.id"
-      >
-        <span class="bottom-nav-icon">
-          <HugeIcon :name="item.icon" :size="19" />
-        </span>
-        <span>{{ item.short }}</span>
-      </button>
-    </nav>
+    <BottomDock :items="navItems" :active-tab="activeTab" @select="activeTab = $event" />
 
     <ScheduleModal
       :open="modalOpen"
