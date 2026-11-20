@@ -141,15 +141,32 @@ jobs:
 
       - name: Install Wails v3 CLI
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+          go install -tags purego github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
       - name: Build Android release APK
-        run: wails3 task android:package
+        run: |
+          wails3 android overlay:gen -out build/android/overlay.json -config build/config.yml
+          mkdir -p build/android/app/src/main/jniLibs/arm64-v8a
+          CGO_ENABLED=1 \
+            GOOS=android \
+            GOARCH=arm64 \
+            CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" \
+            CXX="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" \
+            go build -buildmode=c-shared -overlay build/android/overlay.json -tags production,android -trimpath -buildvcs=false -ldflags="-w -s" -o build/android/app/src/main/jniLibs/arm64-v8a/libwails.so .
+          cd build/android
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
+          mkdir -p ../../bin
+          cp app/build/outputs/apk/release/app-release.apk ../../bin/JPTAnnounce.apk
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4

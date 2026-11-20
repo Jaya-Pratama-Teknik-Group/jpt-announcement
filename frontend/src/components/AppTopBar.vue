@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import logoImg from "../../logo.jpg";
+import logoImg from "../../../build/appicon.png";
 import HugeIcon from "./HugeIcon.vue";
 import type { PlaybackState } from "../types/models";
 
