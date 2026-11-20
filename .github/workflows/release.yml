@@ -1,4 +1,4 @@
-name: Release Windows Installer
+name: Release Windows & Android
 
 on:
   push:
@@ -7,16 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and publish (e.g. v1.0.0)"
+        description: "Release tag to build and publish (e.g. v1.0.1)"
         required: true
-        default: "v1.0.0"
+        default: "v1.0.1"
 
 permissions:
   contents: write
 
 jobs:
-  release-windows:
-    name: Build & Publish Windows Installer
+  build-windows:
+    name: Build Windows Installer
     runs-on: windows-latest
 
     steps:
@@ -82,39 +82,122 @@ jobs:
         shell: pwsh
         run: .\scripts\build-installer.ps1
 
-      - name: Generate SHA256 checksums
-        shell: pwsh
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: |
+            bin/JPT Announce-amd64-setup.exe
+            bin/JPTAnnounce.exe
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: release_tag
         run: |
-          $files = @(
-            "bin\JPT Announce-amd64-setup.exe",
-            "bin\JPTAnnounce.exe"
-          )
-          $lines = foreach ($f in $files) {
-            $hash = (Get-FileHash -Path $f -Algorithm SHA256).Hash.ToLowerInvariant()
-            $name = Split-Path -Path $f -Leaf
-            "$hash  $name"
-          }
-          $lines | Set-Content -Path "bin\SHA256SUMS.txt" -Encoding utf8
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          if [ -z "$TAG" ]; then
+            echo "Release tag is empty" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_tag.outputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK & NDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER=$(command -v sdkmanager || ls "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Install Wails v3 CLI
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Android release APK
+        run: wails3 task android:package
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-dist
+          path: bin/JPTAnnounce.apk
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        working-directory: release-assets
+        run: sha256sum "JPT Announce-amd64-setup.exe" "JPTAnnounce.exe" "JPTAnnounce.apk" > SHA256SUMS.txt
 
       - name: Create or update GitHub Release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "${{ steps.release_tag.outputs.tag }}"
-          $assets = @(
-            "bin/JPT Announce-amd64-setup.exe",
-            "bin/JPTAnnounce.exe",
-            "bin/SHA256SUMS.txt"
-          )
-          $prevPref = $ErrorActionPreference
-          $ErrorActionPreference = "Continue"
-          gh release view $tag *> $null
-          $exists = ($LASTEXITCODE -eq 0)
-          $ErrorActionPreference = $prevPref
-
-          if ($exists) {
-            gh release upload $tag @assets --clobber
-          } else {
-            gh release create $tag @assets --title "JPT Announce $tag" --generate-notes
-          }
+          TAG="${{ steps.release_tag.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "release-assets/JPT Announce-amd64-setup.exe" \
+              "release-assets/JPTAnnounce.exe" \
+              "release-assets/JPTAnnounce.apk" \
+              "release-assets/SHA256SUMS.txt" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "release-assets/JPT Announce-amd64-setup.exe" \
+              "release-assets/JPTAnnounce.exe" \
+              "release-assets/JPTAnnounce.apk" \
+              "release-assets/SHA256SUMS.txt" \
+              --title "JPT Announce $TAG" \
+              --generate-notes
+          fi

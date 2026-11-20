@@ -13,16 +13,11 @@ defineProps<{
 <template>
   <header class="top-bar">
     <div class="top-bar-inner">
-      <div class="brand">
-        <div class="brand-logo-wrap">
-          <img :src="logoImg" alt="Logo JPT Pengumuman Terjadwal" class="brand-logo" />
+      <div class="brand-mark-row">
+        <div class="brand-logo-wrap" title="JPT Announce">
+          <img :src="logoImg" alt="JPT Announce" class="brand-logo" />
         </div>
-        <div class="brand-text">
-          <p class="brand-title">JPT Announce</p>
-          <p class="brand-sub">
-            {{ platformName === "android" ? "Mode Android" : "Pengumuman Terjadwal" }}
-          </p>
-        </div>
+        <span v-if="platformName === 'android'" class="badge badge-muted">Android</span>
       </div>
 
       <div class="top-bar-status">

@@ -4,9 +4,9 @@ Cross-platform scheduled audio announcement application built with **Wails v3** 
 
 The application UI and operational messages are in **Bahasa Indonesia**, designed with a responsive mobile-first layout for **Windows desktop** (primary target) and **experimental Android** builds from a single codebase.
 
-## Download (Windows)
+## Download (Windows & Android)
 
-Pre-built Windows installers (`JPT Announce-amd64-setup.exe`) and standalone executables (`JPTAnnounce.exe`) with SHA-256 checksums are published on the [GitHub Releases](https://github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/releases) page.
+Pre-built Windows installers (`JPT Announce-amd64-setup.exe`), standalone Windows executables (`JPTAnnounce.exe`), and Android APKs (`JPTAnnounce.apk`) with SHA-256 checksums are published on the [GitHub Releases](https://github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/releases) page.
 
 ## Features
 
@@ -158,9 +158,18 @@ cd frontend && npm run build
 
 ## Building for Android (APK / AAB — Experimental)
 
-### Build Host Requirement
+### Option A — Directly on Windows (Android Studio SDK/NDK)
 
-`build/android/Taskfile.yml` executes bash scripts and checks `uname -s` for **Linux** or **Darwin (macOS)**. On a Windows machine, run Android builds inside **WSL2 (Ubuntu/Linux)** (or on a Linux/macOS host).
+If Android Studio's SDK/NDK and JDK 17+ are installed locally on Windows, build `bin\JPTAnnounce.apk` directly without WSL2:
+
+```powershell
+.\scripts\build-android.ps1          # Release APK (arm64-v8a) -> bin\JPTAnnounce.apk
+.\scripts\build-android.ps1 -Fat     # Universal APK (arm64-v8a + x86_64)
+```
+
+### Option B — WSL2 / Linux / macOS (`wails3 task android:*`)
+
+`build/android/Taskfile.yml` executes bash scripts and checks `uname -s` for **Linux** or **Darwin (macOS)**. On a Windows machine without `scripts\build-android.ps1`, run `wails3 task android:*` inside **WSL2 (Ubuntu/Linux)** (or on a Linux/macOS host).
 
 ### Prerequisites (inside WSL2 / Linux / macOS)
 
@@ -196,7 +205,7 @@ wails3 task android:bundle
 ### Android Signing, App ID & MVP Notes
 
 - **Signing**: Without keystore environment variables, `android:package` signs the APK using the debug keystore (suitable for local testing/sideloading). For release signing, set `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
-- **Package ID**: Configured as `applicationId = "com.wails.app"` in `build/android/app/build.gradle` (`APP_ID` in `build/android/Taskfile.yml`); update both before public distribution if you want a custom package ID (e.g., `id.jpt.announce`).
+- **Package ID**: Configured as `applicationId = "id.jpt.announce"` in `build/android/app/build.gradle` (`APP_ID` in `build/android/Taskfile.yml`), matching `productIdentifier` in `build/config.yml`.
 - **MVP Limitation**: On Android, desktop features (`StartupManager`, `TrayController`) are isolated behind build tags as safe no-ops, and scheduled announcements fire while the app is open in the foreground. Background execution while minimized or screen-locked requires a native Android Foreground Service (not yet included in the MVP).
 
 ---
@@ -214,4 +223,4 @@ Application data is stored per user under `os.UserConfigDir()/JPTAnnounce` (on W
 
 ## Release Process
 
-Releases follow semantic versioning tags (`vX.Y.Z`). Pushing a `v*` tag triggers [.github/workflows/release.yml](.github/workflows/release.yml) on `windows-latest`, which runs `go test ./...` and `go vet ./...`, builds `JPTAnnounce.exe` and `JPT Announce-amd64-setup.exe` via `scripts/build-installer.ps1`, generates `SHA256SUMS.txt`, and publishes a GitHub Release with the installer attached.
+Releases follow semantic versioning tags (`vX.Y.Z`). Pushing a `v*` tag triggers [.github/workflows/release.yml](.github/workflows/release.yml), which builds the Windows installer (`JPT Announce-amd64-setup.exe`) and executable (`JPTAnnounce.exe`) on `windows-latest`, builds the Android APK (`JPTAnnounce.apk`) on `ubuntu-latest`, generates `SHA256SUMS.txt`, and publishes a GitHub Release with all assets attached.

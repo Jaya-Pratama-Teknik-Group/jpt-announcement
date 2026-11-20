@@ -22,5 +22,7 @@ build/android/app/build/
 build/android/.cxx/
 build/android/app/.cxx/
 build/android/local.properties
+build/android/overlay.json
+build/android/gen/
 *.keystore
 *.jks

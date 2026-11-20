@@ -1,10 +1,26 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import HugeIcon from "../components/HugeIcon.vue";
-import type { AppConfig, DashboardState } from "../types/models";
+import { formatTimes } from "../utils/formatters";
+import type { AppConfig, DashboardState, Schedule } from "../types/models";
 
-defineProps<{
+interface TodayAnnouncementSlot {
+  key: string;
+  scheduleId: string;
+  title: string;
+  time: string;
+  slotMinutes: number;
+  audioName: string;
+  volume: number;
+  status: "done" | "next" | "upcoming";
+}
+
+const props = defineProps<{
   dashboard: DashboardState | null;
+  schedules: Schedule[];
+  audioNameMap: Map<string, string>;
   settings: AppConfig;
+  countdownTick: number;
   liveCountdownText: string;
 }>();
 
@@ -24,6 +40,90 @@ function formatNextTime(iso: string): string {
     hour12: false
   });
 }
+
+function isSameLocalMinute(iso: string | undefined, targetDate: Date, hh: number, mm: number): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === targetDate.getFullYear() &&
+    d.getMonth() === targetDate.getMonth() &&
+    d.getDate() === targetDate.getDate() &&
+    d.getHours() === hh &&
+    d.getMinutes() === mm
+  );
+}
+
+const todayLabel = computed(() =>
+  new Date(props.countdownTick).toLocaleDateString("id-ID", {
+    weekday: "long",
+    day: "numeric",
+    month: "short"
+  })
+);
+
+const todaySlots = computed<TodayAnnouncementSlot[]>(() => {
+  const now = new Date(props.countdownTick);
+  const weekday = now.getDay();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const next = props.dashboard?.nextAnnouncement;
+  const nextDate = next ? new Date(next.scheduledAt) : null;
+  const isNextToday =
+    nextDate !== null &&
+    nextDate.getFullYear() === now.getFullYear() &&
+    nextDate.getMonth() === now.getMonth() &&
+    nextDate.getDate() === now.getDate();
+  const nextTimeHHMM =
+    isNextToday && nextDate
+      ? `${String(nextDate.getHours()).padStart(2, "0")}:${String(nextDate.getMinutes()).padStart(2, "0")}`
+      : "";
+
+  const slots: TodayAnnouncementSlot[] = [];
+
+  for (const sch of props.schedules) {
+    if (!sch.enabled || !sch.audioId) continue;
+    const audioName = props.audioNameMap.get(sch.audioId);
+    if (!audioName) continue;
+    if (sch.days.length > 0 && !sch.days.includes(weekday)) continue;
+
+    for (const timeStr of formatTimes(sch)) {
+      const [hhStr, mmStr] = timeStr.split(":");
+      const hh = Number(hhStr);
+      const mm = Number(mmStr);
+      if (!Number.isInteger(hh) || !Number.isInteger(mm)) continue;
+
+      const slotMinutes = hh * 60 + mm;
+      const isNext =
+        isNextToday && next?.scheduleId === sch.id && nextTimeHHMM === timeStr;
+      const triggeredThisMinute = isSameLocalMinute(sch.lastTriggeredAt, now, hh, mm);
+
+      let status: TodayAnnouncementSlot["status"] = "upcoming";
+      if (isNext) {
+        status = "next";
+      } else if (slotMinutes < nowMinutes || (slotMinutes === nowMinutes && triggeredThisMinute)) {
+        status = "done";
+      }
+
+      slots.push({
+        key: `${sch.id}:${timeStr}`,
+        scheduleId: sch.id,
+        title: sch.title,
+        time: timeStr,
+        slotMinutes,
+        audioName,
+        volume: sch.volume,
+        status
+      });
+    }
+  }
+
+  slots.sort((a, b) => a.slotMinutes - b.slotMinutes || a.title.localeCompare(b.title, "id"));
+  return slots;
+});
+
+const remainingTodayCount = computed(
+  () => todaySlots.value.filter((slot) => slot.status !== "done").length
+);
 </script>
 
 <template>
@@ -161,7 +261,7 @@ function formatNextTime(iso: string): string {
       </div>
     </div>
 
-    <div class="card hero-card">
+    <div class="card hero-card" style="margin-bottom: 16px">
       <div class="hero-layout">
         <div>
           <p class="hero-kicker">
@@ -219,6 +319,83 @@ function formatNextTime(iso: string): string {
           >
             <HugeIcon name="calendar-03" :size="17" />
             <span>Kelola Jadwal</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="today-card-header">
+        <div>
+          <h3 class="today-card-title">Jadwal Hari Ini</h3>
+          <p class="page-subtitle">{{ todayLabel }}</p>
+        </div>
+        <span
+          class="badge"
+          :class="remainingTodayCount > 0 ? 'badge-primary' : 'badge-muted'"
+        >
+          <template v-if="todaySlots.length === 0">0 jadwal</template>
+          <template v-else-if="remainingTodayCount === 0">
+            Semua selesai ({{ todaySlots.length }})
+          </template>
+          <template v-else>
+            {{ remainingTodayCount }} tersisa &bull; {{ todaySlots.length }} total
+          </template>
+        </span>
+      </div>
+
+      <div v-if="todaySlots.length === 0" class="today-empty">
+        <HugeIcon name="calendar-03" :size="18" />
+        <span>Tidak ada pengumuman yang dijadwalkan berbunyi hari ini.</span>
+      </div>
+
+      <div v-else class="today-list">
+        <div
+          v-for="slot in todaySlots"
+          :key="slot.key"
+          class="today-row"
+          :class="{ 'is-done': slot.status === 'done', 'is-next': slot.status === 'next' }"
+        >
+          <div class="today-row-left">
+            <span class="time-pill" :class="{ 'time-pill-accent': slot.status === 'next' }">
+              {{ slot.time }}
+            </span>
+            <div class="today-row-info">
+              <div class="today-row-title-line">
+                <strong class="today-row-title">{{ slot.title }}</strong>
+                <span
+                  class="badge"
+                  :class="
+                    slot.status === 'next'
+                      ? 'badge-accent'
+                      : slot.status === 'done'
+                        ? 'badge-muted'
+                        : 'badge-primary'
+                  "
+                >
+                  {{
+                    slot.status === "next"
+                      ? "Berikutnya"
+                      : slot.status === "done"
+                        ? "Selesai"
+                        : "Akan datang"
+                  }}
+                </span>
+              </div>
+              <p class="page-subtitle today-row-meta">
+                {{ slot.audioName }} &bull; Volume {{ slot.volume }}%
+              </p>
+            </div>
+          </div>
+
+          <button
+            class="btn btn-sm"
+            :class="slot.status === 'next' ? 'btn-soft-accent' : 'btn-soft-primary'"
+            type="button"
+            @click="emit('play-schedule-now', slot.scheduleId)"
+          >
+            <HugeIcon name="play" :size="14" />
+            <span>Putar</span>
           </button>
         </div>
       </div>
