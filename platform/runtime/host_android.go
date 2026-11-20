@@ -48,6 +48,7 @@ func Capabilities() domain.PlatformCapabilities {
 		SupportsBackgroundScheduler: false,
 		SupportsNativeFilePicker:    false,
 		SupportsAudioDucking:        false,
+		SupportsLiveAnnouncement:    false,
 		SupportedAudioFormats:       []string{".mp3", ".mpeg", ".mpga", ".wav"},
 	}
 }
@@ -55,6 +56,11 @@ func Capabilities() domain.PlatformCapabilities {
 // SetupAudioDucker returns a safe no-op audio ducker on Android.
 func SetupAudioDucker() platform.AudioDucker {
 	return android.NoopAudioDucker{}
+}
+
+// SetupLiveMic returns a safe no-op live microphone streamer on Android.
+func SetupLiveMic() platform.LiveMicStreamer {
+	return android.NoopLiveMicStreamer{}
 }
 
 // SetupAdapters initializes Android audio playback and safe no-op desktop adapters.

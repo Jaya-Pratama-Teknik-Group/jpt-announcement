@@ -2,7 +2,10 @@
 
 package android
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // NoopStartupManager isolates desktop login autostart from Android builds.
 type NoopStartupManager struct{}
@@ -32,3 +35,12 @@ type NoopAudioDucker struct{}
 
 func (NoopAudioDucker) Duck(int) error { return nil }
 func (NoopAudioDucker) Restore() error { return nil }
+
+// NoopLiveMicStreamer is a safe no-op live microphone streamer on Android builds.
+type NoopLiveMicStreamer struct{}
+
+func (NoopLiveMicStreamer) Start(context.Context, int, func(error)) error {
+	return errors.New("pengumuman langsung tidak didukung di Android")
+}
+func (NoopLiveMicStreamer) Stop() error    { return nil }
+func (NoopLiveMicStreamer) IsActive() bool { return false }

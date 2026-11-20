@@ -72,6 +72,12 @@ export const api = {
   stopAudio(): Promise<void> {
     return invoke<void>("StopAudio");
   },
+  startLiveAnnouncement(): Promise<void> {
+    return invoke<void>("StartLiveAnnouncement");
+  },
+  stopLiveAnnouncement(): Promise<void> {
+    return invoke<void>("StopLiveAnnouncement");
+  },
   getSettings(): Promise<AppConfig> {
     return invoke<AppConfig>("GetSettings");
   },

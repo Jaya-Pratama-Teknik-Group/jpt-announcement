@@ -27,6 +27,7 @@ type Service struct {
 	logger           *logging.Logger
 	audio            platform.AudioPlayer
 	ducker           platform.AudioDucker
+	liveMic          platform.LiveMicStreamer
 	startup          platform.StartupManager
 	tray             platform.TrayController
 	notifier         platform.Notifier
@@ -48,6 +49,7 @@ type Options struct {
 	Logger       *logging.Logger
 	Audio        platform.AudioPlayer
 	AudioDucker  platform.AudioDucker
+	LiveMic      platform.LiveMicStreamer
 	Startup      platform.StartupManager
 	Tray         platform.TrayController
 	Notifier     platform.Notifier
@@ -63,6 +65,7 @@ func NewService(opts Options) *Service {
 		logger:       opts.Logger,
 		audio:        opts.Audio,
 		ducker:       opts.AudioDucker,
+		liveMic:      opts.LiveMic,
 		startup:      opts.Startup,
 		tray:         opts.Tray,
 		notifier:     opts.Notifier,
@@ -96,6 +99,11 @@ func (s *Service) SetNotifier(notifier platform.Notifier) {
 // SetAudioDucker attaches the platform audio ducker after app creation.
 func (s *Service) SetAudioDucker(ducker platform.AudioDucker) {
 	s.ducker = ducker
+}
+
+// SetLiveMic attaches the platform live microphone streamer after app creation.
+func (s *Service) SetLiveMic(liveMic platform.LiveMicStreamer) {
+	s.liveMic = liveMic
 }
 
 // SetFilePicker sets the native file dialog callback.
@@ -139,6 +147,9 @@ func (s *Service) Start() {
 // Shutdown stops background scheduling and any active audio cleanly.
 func (s *Service) Shutdown() {
 	s.scheduler.Stop()
+	if s.liveMic != nil {
+		_ = s.liveMic.Stop()
+	}
 	if s.audio != nil {
 		_ = s.audio.Stop()
 	}
@@ -530,7 +541,10 @@ func (s *Service) PlayDefaultOrFirstAudio() error {
 
 // PauseAudio temporarily pauses active audio playback.
 func (s *Service) PauseAudio() error {
-	if s.audio == nil {
+	s.playMu.RLock()
+	isLive := s.playback.IsLive
+	s.playMu.RUnlock()
+	if isLive || s.audio == nil {
 		return nil
 	}
 	if err := s.audio.Pause(); err != nil {
@@ -553,12 +567,13 @@ func (s *Service) PauseAudio() error {
 
 // ResumeAudio resumes paused audio playback.
 func (s *Service) ResumeAudio() error {
-	if s.audio == nil {
-		return nil
-	}
 	s.playMu.RLock()
+	isLive := s.playback.IsLive
 	shouldDuck := s.playback.IsPlaying && s.playback.IsPaused
 	s.playMu.RUnlock()
+	if isLive || s.audio == nil {
+		return nil
+	}
 	if shouldDuck {
 		cfg, err := s.store.LoadConfig()
 		if err != nil {
@@ -591,8 +606,9 @@ func (s *Service) TogglePauseAudio() error {
 	s.playMu.RLock()
 	playing := s.playback.IsPlaying
 	paused := s.playback.IsPaused
+	isLive := s.playback.IsLive
 	s.playMu.RUnlock()
-	if !playing {
+	if !playing || isLive {
 		return nil
 	}
 	if paused {
@@ -601,21 +617,127 @@ func (s *Service) TogglePauseAudio() error {
 	return s.PauseAudio()
 }
 
-// StopAudio halts active playback immediately.
+// StartLiveAnnouncement activates the microphone and streams live voice audio to speakers.
+func (s *Service) StartLiveAnnouncement() error {
+	if !s.capabilities.SupportsLiveAnnouncement || s.liveMic == nil {
+		return errors.New("pengumuman langsung tidak didukung pada platform ini")
+	}
+	if s.liveMic.IsActive() {
+		return nil
+	}
+
+	cfg, cfgErr := s.store.LoadConfig()
+	if cfgErr != nil {
+		cfg = domain.DefaultAppConfig()
+	}
+
+	now := time.Now()
+	s.playMu.Lock()
+	s.playSeq++
+	token := s.playSeq
+	s.playback = domain.PlaybackState{
+		IsPlaying: true,
+		IsPaused:  false,
+		IsLive:    true,
+		AudioName: "Pengumuman Langsung (Mikrofon)",
+		StartedAt: &now,
+	}
+	s.playMu.Unlock()
+
+	if s.audio != nil {
+		_ = s.audio.Stop()
+	}
+	if s.notifier != nil {
+		s.notifier.DismissPlayback()
+	}
+	s.notifyChanged()
+	s.applyDucking(cfg)
+
+	if err := s.liveMic.Start(context.Background(), cfg.DefaultVolume, func(stopErr error) {
+		s.playMu.Lock()
+		isCurrent := s.playSeq == token
+		if isCurrent {
+			s.playback = domain.PlaybackState{}
+		}
+		s.playMu.Unlock()
+		if !isCurrent {
+			return
+		}
+		if stopErr != nil {
+			s.logger.Warn("audio", "Siaran langsung mikrofon terhenti: "+stopErr.Error())
+		}
+		s.restoreDucking()
+		s.notifyChanged()
+	}); err != nil {
+		s.playMu.Lock()
+		isCurrent := s.playSeq == token
+		if isCurrent {
+			s.playback = domain.PlaybackState{}
+		}
+		s.playMu.Unlock()
+		if isCurrent {
+			s.restoreDucking()
+		}
+		s.logger.Error("audio", "Gagal memulai pengumuman langsung: "+err.Error())
+		s.notifyChanged()
+		return err
+	}
+
+	s.logger.Info("audio", fmt.Sprintf("Pengumuman langsung dimulai (volume %d%%)", cfg.DefaultVolume))
+	return nil
+}
+
+// StopLiveAnnouncement turns off active live microphone streaming and restores ducked audio.
+func (s *Service) StopLiveAnnouncement() error {
+	if s.liveMic == nil {
+		return nil
+	}
+	s.playMu.Lock()
+	wasLive := s.playback.IsLive
+	if wasLive {
+		s.playSeq++
+		s.playback = domain.PlaybackState{}
+	}
+	s.playMu.Unlock()
+
+	err := s.liveMic.Stop()
+	if wasLive {
+		s.restoreDucking()
+		s.logger.Info("audio", "Pengumuman langsung dihentikan")
+		s.notifyChanged()
+	}
+	return err
+}
+
+// StopAudio halts active playback or live microphone announcement immediately.
 func (s *Service) StopAudio() error {
-	if s.audio == nil {
+	if s.audio == nil && s.liveMic == nil {
 		return nil
 	}
 	s.playMu.Lock()
 	s.playSeq++
+	wasLive := s.playback.IsLive
 	s.playback = domain.PlaybackState{}
 	s.playMu.Unlock()
-	err := s.audio.Stop()
+
+	var err error
+	if s.liveMic != nil {
+		err = s.liveMic.Stop()
+	}
+	if s.audio != nil {
+		if stopErr := s.audio.Stop(); err == nil {
+			err = stopErr
+		}
+	}
 	s.restoreDucking()
 	if s.notifier != nil {
 		s.notifier.DismissPlayback()
 	}
-	s.logger.Info("audio", "Pemutaran audio dihentikan")
+	if wasLive {
+		s.logger.Info("audio", "Pengumuman langsung dihentikan")
+	} else {
+		s.logger.Info("audio", "Pemutaran audio dihentikan")
+	}
 	s.notifyChanged()
 	return err
 }
@@ -730,6 +852,9 @@ func (s *Service) playAsset(audioID, scheduleID, scheduleTitle string, volume in
 		StartedAt:     &now,
 	}
 	s.playMu.Unlock()
+	if s.liveMic != nil && s.liveMic.IsActive() {
+		_ = s.liveMic.Stop()
+	}
 	s.notifyChanged()
 
 	s.applyDucking(cfg)

@@ -29,6 +29,7 @@ export interface AppConfig {
   defaultVolume: number;
   duckOtherAudio: boolean;
   duckVolumePercent: number;
+  liveAnnouncementEnabled: boolean;
   schedulerEnabled: boolean;
   language: string;
 }
@@ -49,6 +50,7 @@ export interface PlatformCapabilities {
   supportsBackgroundScheduler: boolean;
   supportsNativeFilePicker: boolean;
   supportsAudioDucking: boolean;
+  supportsLiveAnnouncement: boolean;
   supportedAudioFormats: string[];
 }
 
@@ -64,6 +66,7 @@ export interface NextAnnouncementInfo {
 export interface PlaybackState {
   isPlaying: boolean;
   isPaused: boolean;
+  isLive?: boolean;
   audioId?: string;
   audioName?: string;
   scheduleId?: string;

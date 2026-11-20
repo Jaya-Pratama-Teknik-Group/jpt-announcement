@@ -22,6 +22,13 @@ type AudioDucker interface {
 	Restore() error
 }
 
+// LiveMicStreamer captures audio from the default microphone and streams it live to speakers.
+type LiveMicStreamer interface {
+	Start(ctx context.Context, volume int, onStop func(error)) error
+	Stop() error
+	IsActive() bool
+}
+
 // Notifier sends OS-level interactive notifications when scheduled audio plays.
 type Notifier interface {
 	NotifyPlayback(scheduleTitle, audioName string, paused bool)

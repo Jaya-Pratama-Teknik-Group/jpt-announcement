@@ -4,18 +4,25 @@ Cross-platform scheduled audio announcement application built with **Wails v3** 
 
 The application UI and operational messages are in **Bahasa Indonesia**, designed with a responsive mobile-first layout for **Windows desktop** (primary target) and **experimental Android** builds from a single codebase.
 
+## Download (Windows)
+
+Pre-built Windows installers (`JPT Announce-amd64-setup.exe`) and standalone executables (`JPTAnnounce.exe`) with SHA-256 checksums are published on the [GitHub Releases](https://github.com/Jaya-Pratama-Teknik-Group/jpt-announcement/releases) page.
+
 ## Features
 
 - **Dashboard (`Dasbor`)**: Live scheduler status, active schedule count, audio library count, active playback status, and a real-time 24-hour countdown to the next scheduled announcement.
+- **Live Microphone Announcement (`Pengumuman Langsung`)**: Optional Dashboard button (hidden by default; enabled from *Pengaturan*) on Windows that captures the default microphone in pure Go (`winmm.dll` -> `gopxl/beep/v2`) and broadcasts live voice directly to speakers while ducking other Windows audio.
 - **Multi-Time Recurring Schedules (`Jadwal`)**:
   - Create, edit, toggle, delete, and manually test announcements with **multiple trigger times per schedule** using a dedicated **24-hour (`00:00–23:59`)** time selector, per-day-of-week selection, and per-schedule volume (`0–100%`).
   - **Preview Audio in Form**: Play/stop the selected audio directly inside the schedule editor modal using the configured volume.
   - **Export & Import Schedules (`.json`)**: Export schedules into a portable JSON bundle and import them onto another device. Imported schedules start **disabled (`Nonaktif`)** without an assigned audio file and cannot be activated until an audio asset is selected.
 - **Local Audio Library (`Audio`)**: Clean list view to import, preview, and remove local `.mp3`, `.mpeg`, `.mpga`, and `.wav` files powered by `gopxl/beep/v2` + `ebitengine/oto/v3` (pure Go on Windows; no FFmpeg binary required; includes pure-Go MPEG-PS audio stream demuxing for `.mpeg` files).
 - **Windows Integration**:
+  - **WASAPI Audio Ducking**: Automatically lowers other active Windows audio sessions (e.g., music/video players) to a configurable percentage (default `25%`) during announcements and smoothly restores their original levels afterward.
+  - **Interactive Playback Notifications**: Silent Windows Toasts with *Jeda Audio* / *Lanjutkan* / *Hentikan* / *OK* controls during scheduled announcements, mirrored by an in-app floating notification card and Android local notifications.
   - **System Tray**: Custom rounded JPT tray icon and Bahasa Indonesia menu (*Buka JPT Announce*, *Pengumuman berikutnya*, *Putar audio*, *Pengaturan*, *Keluar*). Closing the window hides it to the tray instead of exiting.
-  - **Autostart**: Optional Windows login autostart via `HKCU` registry (no administrator privileges required), launching with `--hidden` directly into the system tray.
-- **Responsive Mobile-First UI**: Offline **HugeIcons** (`@iconify/vue`), JPT brand logo & soft pastel menu accents, custom confirmation/form modals, desktop sidebar, and mobile bottom navigation (`viewport-fit=cover` and `env(safe-area-inset-*)`).
+  - **Autostart**: Optional Windows login autostart via `HKCU` registry (no administrator privileges required), launching with `--hidden` directly into the system tray and self-healing its executable path if moved.
+- **Responsive Mobile-First UI**: Offline **HugeIcons** (`@iconify/vue`), JPT brand logo & soft pastel menu accents, custom confirmation/form/auto-closing alert modals, desktop sidebar, and mobile bottom navigation (`viewport-fit=cover` and `env(safe-area-inset-*)`).
 - **Activity Log**: Recent operational logs stored locally and surfaced in *Pengaturan*.
 
 ## Project Structure
@@ -24,19 +31,21 @@ The application UI and operational messages are in **Bahasa Indonesia**, designe
 jpt-announcement/
 ├── main.go                     # Wails v3 entry point, embedded icon/assets, --hidden flag
 ├── Taskfile.yml                # Wails v3 build/dev task entry point
+├── .github/workflows/          # GitHub Actions tag-based Windows release pipeline
+├── scripts/                    # Standalone PowerShell NSIS installer builder
 ├── build/                      # Wails v3 build config, rounded icons, Windows & Android assets
 ├── shared/
 │   ├── domain/                 # Data models, 24h multi-time & export validation
 │   ├── config/                 # JSON persistence & managed local audio store
 │   ├── scheduler/              # OS-independent multi-time announcement scheduler
-│   ├── announcement/           # Bound Wails v3 Service (schedules, audio, export/import)
+│   ├── announcement/           # Bound Wails v3 Service (schedules, audio, live mic, ducking, export/import)
 │   └── logging/                # Ring-buffer + file logger
 ├── platform/
-│   ├── interfaces.go           # AudioPlayer, StartupManager, TrayController contracts
-│   ├── audio/                  # Cross-platform gopxl/beep/v2 player + MPEG-PS demuxer
+│   ├── interfaces.go           # AudioPlayer, AudioDucker, LiveMicStreamer, Notifier, StartupManager, TrayController
+│   ├── audio/                  # Cross-platform gopxl/beep/v2 player, shared speaker init, MPEG-PS demuxer
 │   ├── runtime/                # Build-tagged platform capability & adapter wiring
-│   ├── windows/                # Windows autostart, system tray, and audio adapters
-│   └── android/                # Experimental Android audio adapter & no-op desktop stubs
+│   ├── windows/                # Windows audio (WASAPI ducker, winmm mic streamer), notify, startup, tray
+│   └── android/                # Experimental Android audio/notify adapters & no-op desktop stubs
 └── frontend/                   # Vue 3 + TypeScript + Vite UI (HugeIcons + JPT branding)
 ```
 
@@ -200,3 +209,9 @@ Application data is stored per user under `os.UserConfigDir()/JPTAnnounce` (on W
 - `schedules.json` — saved announcement schedules
 - `audio/` — imported `.mp3`, `.mpeg`, `.mpga`, and `.wav` files
 - `jpt-announce.log` — application activity log
+
+---
+
+## Release Process
+
+Releases follow semantic versioning tags (`vX.Y.Z`). Pushing a `v*` tag triggers [.github/workflows/release.yml](.github/workflows/release.yml) on `windows-latest`, which runs `go test ./...` and `go vet ./...`, builds `JPTAnnounce.exe` and `JPT Announce-amd64-setup.exe` via `scripts/build-installer.ps1`, generates `SHA256SUMS.txt`, and publishes a GitHub Release with the installer attached.

@@ -57,25 +57,27 @@ type AudioAsset struct {
 
 // AppConfig holds persistent user preferences across desktop and mobile.
 type AppConfig struct {
-	StartMinimized    bool   `json:"startMinimized"`
-	AutostartEnabled  bool   `json:"autostartEnabled"`
-	DefaultVolume     int    `json:"defaultVolume"`
-	DuckOtherAudio    bool   `json:"duckOtherAudio"`
-	DuckVolumePercent int    `json:"duckVolumePercent"`
-	SchedulerEnabled  bool   `json:"schedulerEnabled"`
-	Language          string `json:"language"`
+	StartMinimized          bool   `json:"startMinimized"`
+	AutostartEnabled        bool   `json:"autostartEnabled"`
+	DefaultVolume           int    `json:"defaultVolume"`
+	DuckOtherAudio          bool   `json:"duckOtherAudio"`
+	DuckVolumePercent       int    `json:"duckVolumePercent"`
+	LiveAnnouncementEnabled bool   `json:"liveAnnouncementEnabled"`
+	SchedulerEnabled        bool   `json:"schedulerEnabled"`
+	Language                string `json:"language"`
 }
 
 // DefaultAppConfig returns safe initial application settings in Bahasa Indonesia.
 func DefaultAppConfig() AppConfig {
 	return AppConfig{
-		StartMinimized:    true,
-		AutostartEnabled:  false,
-		DefaultVolume:     85,
-		DuckOtherAudio:    true,
-		DuckVolumePercent: 25,
-		SchedulerEnabled:  true,
-		Language:          "id",
+		StartMinimized:          true,
+		AutostartEnabled:        false,
+		DefaultVolume:           85,
+		DuckOtherAudio:          true,
+		DuckVolumePercent:       25,
+		LiveAnnouncementEnabled: false,
+		SchedulerEnabled:        true,
+		Language:                "id",
 	}
 }
 
@@ -97,6 +99,7 @@ type PlatformCapabilities struct {
 	SupportsBackgroundScheduler bool     `json:"supportsBackgroundScheduler"`
 	SupportsNativeFilePicker    bool     `json:"supportsNativeFilePicker"`
 	SupportsAudioDucking        bool     `json:"supportsAudioDucking"`
+	SupportsLiveAnnouncement    bool     `json:"supportsLiveAnnouncement"`
 	SupportedAudioFormats       []string `json:"supportedAudioFormats"`
 }
 
@@ -114,6 +117,7 @@ type NextAnnouncementInfo struct {
 type PlaybackState struct {
 	IsPlaying     bool       `json:"isPlaying"`
 	IsPaused      bool       `json:"isPaused"`
+	IsLive        bool       `json:"isLive,omitempty"`
 	AudioID       string     `json:"audioId,omitempty"`
 	AudioName     string     `json:"audioName,omitempty"`
 	ScheduleID    string     `json:"scheduleId,omitempty"`

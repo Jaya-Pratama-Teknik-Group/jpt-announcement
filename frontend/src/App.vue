@@ -28,6 +28,7 @@ const settings = ref<AppConfig>({
   defaultVolume: 85,
   duckOtherAudio: true,
   duckVolumePercent: 25,
+  liveAnnouncementEnabled: false,
   schedulerEnabled: true,
   language: "id"
 });
@@ -433,6 +434,19 @@ async function handleStopAudio() {
   }
 }
 
+async function handleToggleLiveAnnouncement() {
+  try {
+    if (dashboard.value?.playback.isLive) {
+      await api.stopLiveAnnouncement();
+    } else {
+      await api.startLiveAnnouncement();
+    }
+    await refreshAll();
+  } catch (err) {
+    showError(err);
+  }
+}
+
 async function handleSaveSettings() {
   busy.value = true;
   try {
@@ -568,12 +582,31 @@ onUnmounted(() => {
             <p class="page-subtitle">Pantau status penjadwal dan pemutaran audio terkini</p>
           </div>
           <div class="btn-row">
+            <button
+              v-if="
+                dashboard?.platform.supportsLiveAnnouncement &&
+                (settings.liveAnnouncementEnabled || dashboard?.playback.isLive)
+              "
+              class="btn"
+              :class="dashboard?.playback.isLive ? 'btn-danger-solid' : 'btn-soft-primary'"
+              type="button"
+              @click="handleToggleLiveAnnouncement"
+            >
+              <HugeIcon :name="dashboard?.playback.isLive ? 'stop' : 'mic-01'" :size="17" />
+              <span>
+                {{
+                  dashboard?.playback.isLive
+                    ? "Matikan Mikrofon (Aktif)"
+                    : "Pengumuman Langsung"
+                }}
+              </span>
+            </button>
             <button class="btn btn-primary" type="button" @click="openCreateSchedule">
               <HugeIcon name="add-01" :size="17" />
               <span>Tambah Jadwal</span>
             </button>
             <button
-              v-if="dashboard?.playback.isPlaying"
+              v-if="dashboard?.playback.isPlaying && !dashboard.playback.isLive"
               class="btn btn-soft-primary"
               type="button"
               @click="handleTogglePauseAudio"
@@ -582,7 +615,7 @@ onUnmounted(() => {
               <span>{{ dashboard.playback.isPaused ? "Lanjutkan" : "Jeda" }}</span>
             </button>
             <button
-              v-if="dashboard?.playback.isPlaying"
+              v-if="dashboard?.playback.isPlaying && !dashboard.playback.isLive"
               class="btn btn-danger"
               type="button"
               @click="handleStopAudio"
@@ -650,13 +683,23 @@ onUnmounted(() => {
             </p>
             <span
               class="badge"
-              :class="dashboard?.playback.isPlaying ? (dashboard.playback.isPaused ? 'badge-warning' : 'badge-primary') : 'badge-muted'"
+              :class="
+                dashboard?.playback.isPlaying
+                  ? dashboard.playback.isLive
+                    ? 'badge-danger'
+                    : dashboard.playback.isPaused
+                      ? 'badge-warning'
+                      : 'badge-primary'
+                  : 'badge-muted'
+              "
             >
               {{
                 dashboard?.playback.isPlaying
-                  ? dashboard.playback.isPaused
-                    ? "Dijeda"
-                    : "Sedang diputar"
+                  ? dashboard.playback.isLive
+                    ? "Siaran Langsung"
+                    : dashboard.playback.isPaused
+                      ? "Dijeda"
+                      : "Sedang diputar"
                   : "Tidak ada audio"
               }}
             </span>
@@ -1078,6 +1121,21 @@ onUnmounted(() => {
               </p>
             </div>
           </template>
+
+          <div v-if="dashboard?.platform.supportsLiveAnnouncement" class="switch-row" style="margin-top: 14px">
+            <div>
+              <strong>Tampilkan Tombol Pengumuman Langsung</strong>
+              <p class="page-subtitle">
+                Menampilkan tombol &ldquo;Pengumuman Langsung&rdquo; di Dasbor untuk berbicara
+                langsung melalui mikrofon ke pengeras suara (disembunyikan secara bawaan)
+              </p>
+            </div>
+            <input
+              v-model="settings.liveAnnouncementEnabled"
+              class="switch-input"
+              type="checkbox"
+            />
+          </div>
 
           <div class="btn-row" style="margin-top: 16px">
             <button class="btn btn-primary" type="button" :disabled="busy" @click="handleSaveSettings">

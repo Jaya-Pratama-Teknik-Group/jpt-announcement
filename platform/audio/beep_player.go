@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/effects"
@@ -17,13 +16,10 @@ import (
 	"github.com/gopxl/beep/v2/wav"
 )
 
-const targetSampleRate = beep.SampleRate(44100)
+const targetSampleRate = TargetSampleRate
 
 // BeepPlayer implements platform.AudioPlayer using gopxl/beep/v2 (pure Go on Windows, Oboe on Android).
 type BeepPlayer struct {
-	initOnce sync.Once
-	initErr  error
-
 	mu      sync.Mutex
 	playing bool
 	paused  bool
@@ -38,10 +34,7 @@ func NewBeepPlayer() *BeepPlayer {
 }
 
 func (p *BeepPlayer) ensureSpeaker() error {
-	p.initOnce.Do(func() {
-		p.initErr = speaker.Init(targetSampleRate, targetSampleRate.N(time.Second/10))
-	})
-	return p.initErr
+	return EnsureSpeaker()
 }
 
 // Play decodes an MP3 or WAV file and plays it asynchronously, replacing any active playback.
@@ -213,11 +206,5 @@ func (p *BeepPlayer) IsPaused() bool {
 }
 
 func volumeToGain(volume int) float64 {
-	if volume <= 0 {
-		return -8
-	}
-	if volume >= 100 {
-		return 0
-	}
-	return -5.0 * (1.0 - float64(volume)/100.0)
+	return VolumeToGain(volume)
 }

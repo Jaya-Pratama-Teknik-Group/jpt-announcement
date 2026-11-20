@@ -58,6 +58,7 @@ func Capabilities() domain.PlatformCapabilities {
 		SupportsBackgroundScheduler: true,
 		SupportsNativeFilePicker:    true,
 		SupportsAudioDucking:        true,
+		SupportsLiveAnnouncement:    true,
 		SupportedAudioFormats:       []string{".mp3", ".mpeg", ".mpga", ".wav"},
 	}
 }
@@ -65,6 +66,11 @@ func Capabilities() domain.PlatformCapabilities {
 // SetupAudioDucker constructs the Windows WASAPI audio ducker.
 func SetupAudioDucker() platform.AudioDucker {
 	return winaudio.NewDucker()
+}
+
+// SetupLiveMic constructs the Windows live microphone streamer.
+func SetupLiveMic() platform.LiveMicStreamer {
+	return winaudio.NewMicStreamer()
 }
 
 // SetupAdapters initializes Windows audio, autostart, and system tray adapters.

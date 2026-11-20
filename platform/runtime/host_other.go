@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -82,6 +83,7 @@ func Capabilities() domain.PlatformCapabilities {
 		SupportsBackgroundScheduler: true,
 		SupportsNativeFilePicker:    true,
 		SupportsAudioDucking:        false,
+		SupportsLiveAnnouncement:    false,
 		SupportedAudioFormats:       []string{".mp3", ".mpeg", ".mpga", ".wav"},
 	}
 }
@@ -94,6 +96,19 @@ func (noopAudioDucker) Restore() error { return nil }
 // SetupAudioDucker returns a safe no-op audio ducker on non-Windows desktop hosts.
 func SetupAudioDucker() platform.AudioDucker {
 	return noopAudioDucker{}
+}
+
+type noopLiveMic struct{}
+
+func (noopLiveMic) Start(context.Context, int, func(error)) error {
+	return errors.New("pengumuman langsung hanya didukung di Windows")
+}
+func (noopLiveMic) Stop() error    { return nil }
+func (noopLiveMic) IsActive() bool { return false }
+
+// SetupLiveMic returns a safe no-op live microphone streamer on non-Windows desktop hosts.
+func SetupLiveMic() platform.LiveMicStreamer {
+	return noopLiveMic{}
 }
 
 // SetupAdapters initializes fallback desktop adapters.

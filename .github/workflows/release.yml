@@ -1,0 +1,88 @@
+name: Release Windows Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Publish Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails v3 CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+          $goBin = Join-Path (go env GOPATH) "bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $goBin
+
+      - name: Ensure NSIS is installed
+        shell: pwsh
+        run: |
+          $nsis = @(
+            "C:\Program Files (x86)\NSIS\makensis.exe",
+            "C:\Program Files\NSIS\makensis.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $nsis) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Go tests and vet
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build Windows binary and NSIS installer
+        shell: pwsh
+        run: .\scripts\build-installer.ps1
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            "bin\JPT Announce-amd64-setup.exe",
+            "bin\JPTAnnounce.exe"
+          )
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash -Path $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path -Path $f -Leaf
+            "$hash  $name"
+          }
+          $lines | Set-Content -Path "bin\SHA256SUMS.txt" -Encoding utf8
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag `
+            "bin/JPT Announce-amd64-setup.exe" `
+            "bin/JPTAnnounce.exe" `
+            "bin/SHA256SUMS.txt" `
+            --title "JPT Announce $tag" `
+            --generate-notes

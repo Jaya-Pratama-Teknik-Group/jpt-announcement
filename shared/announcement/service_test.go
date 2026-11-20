@@ -349,3 +349,121 @@ func TestAudioDuckingLifecycle(t *testing.T) {
 		t.Fatalf("StopAudio failed: %v", err)
 	}
 }
+
+type fakeLiveMic struct {
+	mu     sync.Mutex
+	active bool
+	volume int
+	stops  int
+	onStop func(error)
+}
+
+func (f *fakeLiveMic) Start(_ context.Context, volume int, onStop func(error)) error {
+	f.mu.Lock()
+	f.active = true
+	f.volume = volume
+	f.onStop = onStop
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeLiveMic) Stop() error {
+	f.mu.Lock()
+	if f.active {
+		f.active = false
+		f.stops++
+	}
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeLiveMic) IsActive() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.active
+}
+
+func TestLiveAnnouncementLifecycle(t *testing.T) {
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	audio := &asyncAudio{}
+	ducker := &fakeDucker{}
+	liveMic := &fakeLiveMic{}
+
+	svc := NewService(Options{
+		Store:       store,
+		Logger:      logging.New(""),
+		Audio:       audio,
+		AudioDucker: ducker,
+		LiveMic:     liveMic,
+		Capabilities: domain.PlatformCapabilities{
+			Platform:                 "windows",
+			IsDesktop:                true,
+			SupportsAudioDucking:     true,
+			SupportsLiveAnnouncement: true,
+		},
+	})
+	defer svc.Shutdown()
+
+	if err := svc.StartLiveAnnouncement(); err != nil {
+		t.Fatalf("StartLiveAnnouncement failed: %v", err)
+	}
+	if !liveMic.IsActive() || liveMic.volume != 85 || !ducker.active {
+		t.Fatalf("expected active live mic + ducker, got active=%v vol=%d ducker=%v", liveMic.IsActive(), liveMic.volume, ducker.active)
+	}
+	state, err := svc.GetDashboardState()
+	if err != nil {
+		t.Fatalf("GetDashboardState failed: %v", err)
+	}
+	if !state.Playback.IsPlaying || !state.Playback.IsLive {
+		t.Fatalf("expected playback IsPlaying && IsLive, got %+v", state.Playback)
+	}
+
+	// PauseAudio is a no-op during live mic streaming
+	if err := svc.PauseAudio(); err != nil {
+		t.Fatalf("PauseAudio failed: %v", err)
+	}
+	state, _ = svc.GetDashboardState()
+	if state.Playback.IsPaused || !state.Playback.IsLive {
+		t.Fatalf("expected live playback to stay unpaused, got %+v", state.Playback)
+	}
+
+	if err := svc.StopLiveAnnouncement(); err != nil {
+		t.Fatalf("StopLiveAnnouncement failed: %v", err)
+	}
+	if liveMic.IsActive() || ducker.active || ducker.restoreCalls != 1 {
+		t.Fatalf("expected live mic stopped and ducker restored, got active=%v ducker=%v restores=%d", liveMic.IsActive(), ducker.active, ducker.restoreCalls)
+	}
+
+	// Starting file playback stops active live mic
+	b64 := base64.StdEncoding.EncodeToString([]byte("RIFFmockwav"))
+	asset, err := svc.ImportAudioBase64("bel.wav", "Bel", b64)
+	if err != nil {
+		t.Fatalf("ImportAudioBase64 failed: %v", err)
+	}
+	if err := svc.StartLiveAnnouncement(); err != nil {
+		t.Fatalf("StartLiveAnnouncement(2) failed: %v", err)
+	}
+	if err := svc.PlayAudio(asset.ID, 80); err != nil {
+		t.Fatalf("PlayAudio while live failed: %v", err)
+	}
+	if liveMic.IsActive() {
+		t.Fatal("expected PlayAudio to stop active live mic")
+	}
+	audio.finish()
+
+	// Unsupported platform rejects live announcement
+	androidSvc := NewService(Options{
+		Store:  store,
+		Logger: logging.New(""),
+		Capabilities: domain.PlatformCapabilities{
+			Platform:                 "android",
+			SupportsLiveAnnouncement: false,
+		},
+	})
+	if err := androidSvc.StartLiveAnnouncement(); err == nil {
+		t.Fatal("expected unsupported platform error for StartLiveAnnouncement")
+	}
+}
