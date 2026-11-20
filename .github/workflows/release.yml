@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
 
 permissions:
   contents: write
@@ -14,8 +20,20 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Release tag is empty"
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_tag.outputs.tag }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -74,15 +92,25 @@ jobs:
           }
           $lines | Set-Content -Path "bin\SHA256SUMS.txt" -Encoding utf8
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          gh release create $tag `
-            "bin/JPT Announce-amd64-setup.exe" `
-            "bin/JPTAnnounce.exe" `
-            "bin/SHA256SUMS.txt" `
-            --title "JPT Announce $tag" `
-            --generate-notes
+          $tag = "${{ steps.release_tag.outputs.tag }}"
+          $assets = @(
+            "bin/JPT Announce-amd64-setup.exe",
+            "bin/JPTAnnounce.exe",
+            "bin/SHA256SUMS.txt"
+          )
+          $prevPref = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          gh release view $tag *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $prevPref
+
+          if ($exists) {
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets --title "JPT Announce $tag" --generate-notes
+          }
